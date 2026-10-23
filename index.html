@@ -173,7 +173,12 @@
           body: JSON.stringify({ messages: history })
         });
         const data = await response.json();
-        if (!response.ok || data.ok !== true) throw new Error(data.error || 'Не удалось получить ответ.');
+        if (!response.ok || data.ok !== true) {
+          const diagnostics = data.upstreamStatus
+            ? ' [Gateway HTTP ' + data.upstreamStatus + (data.upstreamCode ? ', код ' + data.upstreamCode : '') + (data.upstreamType ? ', тип ' + data.upstreamType : '') + ']'
+            : (data.code ? ' [' + data.code + ']' : '');
+          throw new Error((data.error || 'Не удалось получить ответ.') + diagnostics);
+        }
         addBubble('assistant', data.reply);
         history.push({ role: 'assistant', content: data.reply });
         while (history.length > 10) history.shift();
