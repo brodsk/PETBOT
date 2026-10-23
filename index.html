@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <title>PETBOT · Панель управления</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#151d31; --line:#2b3853; --text:#edf2ff; --muted:#a8b4cc; --accent:#9fe870; }
+    * { box-sizing:border-box }
+    body { margin:0; min-height:100vh; background:radial-gradient(ellipse at top,#1c2945 0,var(--bg) 58%); color:var(--text); font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+    main { width:min(960px,100%); margin:auto; padding:28px 18px 48px }
+    header { display:flex; align-items:center; gap:14px; margin-bottom:26px }
+    .logo { width:58px;height:58px;border:1px solid #405274;border-radius:18px;display:grid;place-items:center;background:#202e47;font-size:29px }
+    h1 { font-size:clamp(25px,5vw,38px); margin:0; letter-spacing:.04em }
+    .sub,.muted { color:var(--muted) }
+    .sub { margin:2px 0 0 }
+    .grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px }
+    .card { border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,#19243a,#11182a);padding:20px }
+    .label { color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.08em }
+    .value { font-size:23px;font-weight:650;margin-top:8px }
+    .dot { display:inline-block;width:9px;height:9px;border-radius:50%;background:#f6c453;margin-right:8px }
+    .face { font-size:76px;line-height:1.25;text-align:center;padding:14px }
+    button { border:1px solid #4a5c7d;background:#253653;color:var(--text);padding:11px 15px;border-radius:12px;font:inherit;cursor:pointer }
+    button:focus-visible { outline:2px solid var(--accent);outline-offset:3px }
+    .actions { display:flex;gap:10px;flex-wrap:wrap;margin-top:18px }
+    .notice { margin-top:16px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;color:var(--muted) }
+    footer { margin-top:28px;color:var(--muted);font-size:13px }
+    @media(max-width:520px){main{padding:20px 14px 36px}.card{padding:17px}}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="logo" aria-hidden="true">🤖</div>
+      <div><h1>PETBOT</h1><p class="sub">Облачный мозг · Панель управления</p></div>
+    </header>
+
+    <section class="grid" aria-label="Состояние робота">
+      <article class="card">
+        <div class="label">Связь с роботом</div>
+        <div class="value"><span class="dot"></span><span id="connection">Проверяем API…</span></div>
+        <p class="muted" id="api-detail">Проверка облачного сервиса</p>
+      </article>
+      <article class="card">
+        <div class="label">Настроение</div>
+        <div class="face" aria-label="Нейтральное лицо">◡</div>
+        <div class="value">Любопытный</div>
+        <p class="muted">Пока демонстрационный статус</p>
+      </article>
+      <article class="card">
+        <div class="label">Аппаратное состояние</div>
+        <div class="value">Не подключён</div>
+        <p class="muted">LILYGO T3 / ESP32 подключим на следующем этапе</p>
+      </article>
+    </section>
+
+    <section class="card" style="margin-top:14px">
+      <div class="label">Быстрые действия</div>
+      <p>Сначала поднимем безопасный канал связи. Реальные команды движения появятся после подключения платы и проверки драйвера моторов.</p>
+      <div class="actions">
+        <button id="refresh" type="button">Проверить связь</button>
+        <button id="events" type="button">Показать статус</button>
+      </div>
+      <p class="muted" id="message" role="status" aria-live="polite">Робот пока не подключён.</p>
+    </section>
+
+    <div class="notice">Безопасный режим: эта стартовая панель не запускает моторы и не отправляет команды движения.</div>
+    <footer>PETBOT · Начальная версия · Секретные ключи будут храниться только на сервере.</footer>
+  </main>
+  <script>
+    const connection = document.getElementById('connection');
+    const detail = document.getElementById('api-detail');
+    const message = document.getElementById('message');
+    async function checkApi() {
+      connection.textContent = 'Проверяем…';
+      detail.textContent = 'Запрос /api/health';
+      try {
+        const response = await fetch('/api/health', { headers: { accept: 'application/json' } });
+        const data = await response.json();
+        if (!response.ok || data.ok !== true) throw new Error('API вернул ошибку');
+        connection.textContent = 'Облако работает';
+        detail.textContent = 'Сервис отвечает · ' + data.service;
+        message.textContent = 'API доступен. Сам робот пока не подключён.';
+      } catch (error) {
+        connection.textContent = 'API недоступен';
+        detail.textContent = 'После деплоя нажмите «Проверить связь» ещё раз.';
+        message.textContent = 'Не удалось проверить API: ' + error.message;
+      }
+    }
+    document.getElementById('refresh').addEventListener('click', checkApi);
+    document.getElementById('events').addEventListener('click', () => {
+      message.textContent = 'Статус: веб-панель запущена; плата и датчики ещё не подключены.';
+    });
+    checkApi();
+  </script>
+</body>
+</html>
