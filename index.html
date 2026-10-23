@@ -463,7 +463,7 @@
     let lastGreetingAt = 0;
 
     function startRecognitionSafely() {
-      if (!recognition || !voiceEnabled || isSpeaking) return;
+      if (!recognition || !voiceEnabled || isSpeaking || voiceSubmitting) return;
       if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
       recognitionRestartTimer = setTimeout(() => {
         if (!voiceEnabled || isSpeaking) return;
@@ -502,7 +502,7 @@
       }
       chatinput.value = cleaned;
       document.getElementById('chatform').requestSubmit();
-      setTimeout(() => { voiceSubmitting = false; }, 1800);
+      setTimeout(() => { voiceSubmitting = false; startRecognitionSafely(); }, 1800);
     }
 
     if (!SpeechRecognition) {
