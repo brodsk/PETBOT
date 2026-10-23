@@ -108,8 +108,10 @@ bool cloudRequest(const char* path, const String& method, const String& body, St
 }
 
 void sendHeartbeat() {
-  String body = "{\"firmware\":\"petbot-0.2\",\"wifi_rssi\":" + String(WiFi.RSSI()) +
-    ",\"free_heap\":" + String(ESP.getFreeHeap()) + ",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
+  String body = "{\"firmware\":\"petbot-0.3-emotions\",\"wifi_rssi\":" + String(WiFi.RSSI()) +
+    ",\"free_heap\":" + String(ESP.getFreeHeap()) + ",\"ip\":\"" + WiFi.localIP().toString() +
+    "\",\"mood\":\"" + mood + "\",\"autonomy\":true,\"battery_mv\":null," +
+    "\"uv_sensor_connected\":false,\"camera_connected\":false,\"motors_enabled\":false}";
   cloudRequest("/api/device/heartbeat", "POST", body, nullptr);
 }
 
