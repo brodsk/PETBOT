@@ -1,8 +1,9 @@
 /*
-  PETBOT firmware v1.0 digital IR input
+  PETBOT firmware v1.4
   Board: LILYGO T3 V1.6.1 / ESP32
-  Features: expressive OLED face, randomized autonomous moods and blinks, Wi-Fi setup,
+  Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
+  Unused IR input removed; USB Serial RX remains available for provisioning.
   Motors, UV sensor and camera remain disabled.
 */
 
@@ -27,12 +28,6 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define OLED_SCL 22
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-// Single digital output from the IR module is connected to board RXD (GPIO3).
-// Keep USB Serial TX for logs, but disable its RX so GPIO3 can be read as a digital input.
-const int IR_SENSOR_PIN = 3;
-int lastIrLevel = HIGH;
-unsigned long lastIrLog = 0;
 
 String mood = "CURIOUS";
 String lastCloudMood = "";
@@ -321,11 +316,7 @@ void handleSerialProvisioning() {
 }
 
 void setup() {
-  Serial.begin(115200, SERIAL_8N1, -1, 1);
-  pinMode(IR_SENSOR_PIN, INPUT);
-  lastIrLevel = digitalRead(IR_SENSOR_PIN);
-  Serial.println("PETBOT digital IR input enabled on RXD/GPIO3.");
-  Serial.println("USB Serial is TX-only; sensor input is read as digital level.");
+  Serial.begin(115200);
 
   petbotPrefs.begin("petbot", true);
   deviceToken = petbotPrefs.getString("device_token", "");
@@ -502,21 +493,7 @@ void updateAutonomousMood() {
 }
 
 void loop() {
-  int irLevel = digitalRead(IR_SENSOR_PIN);
-  if (irLevel != lastIrLevel) {
-    lastIrLevel = irLevel;
-    Serial.printf("IR DIGITAL GPIO3 = %s\\n", irLevel == HIGH ? "HIGH" : "LOW");
-    lastIrLog = millis();
-
-    // Common digital IR modules assert LOW when detecting a nearby object.
-    if (irLevel == LOW) {
-      mood = "SURPRISED";
-      moodOverrideUntil = millis() + 2500UL;
-      drawFace();
-    }
-  }
-
-  // Serial RX is intentionally disabled because GPIO3 is the IR sensor input.
+  handleSerialProvisioning();
   updateAutonomousMood();
   updateMicroAction();
 
