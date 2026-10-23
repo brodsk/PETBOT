@@ -17,7 +17,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.3-smooth-eyes";
+const char* FIRMWARE_VERSION = "petbot-1.4";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
