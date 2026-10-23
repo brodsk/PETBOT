@@ -223,7 +223,12 @@
     }
 
     document.querySelectorAll('[data-mood]').forEach(button => {
-      button.addEventListener('click', () => sendRobotAction({ mood: button.dataset.mood }));
+      button.addEventListener('click', () => {
+        const mood = button.dataset.mood;
+        // Update the selected outline immediately; the API response will confirm it.
+        setMoodSelected(mood);
+        sendRobotAction({ mood });
+      });
     });
     document.querySelectorAll('[data-command]').forEach(button => {
       button.addEventListener('click', () => sendRobotAction({ command: button.dataset.command }));
