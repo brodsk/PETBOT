@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v0.7
+  PETBOT firmware v0.9 sensor diagnostic
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, randomized autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -13,10 +13,11 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <HardwareSerial.h>
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-0.8";
+const char* FIRMWARE_VERSION = "petbot-0.9-sensor-diag";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -27,6 +28,11 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define OLED_SCL 22
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// Sensor diagnostic UART: connect sensor TX to GPIO32 (not board RXD).
+// Unknown module/protocol: log raw bytes at 9600 baud for identification.
+HardwareSerial sensorSerial(2);
+const int SENSOR_RX_PIN = 32;
 
 String mood = "CURIOUS";
 String lastCloudMood = "";
@@ -304,6 +310,8 @@ void handleSerialProvisioning() {
 void setup() {
   Serial.begin(115200);
   Serial.setTimeout(150);
+  sensorSerial.begin(9600, SERIAL_8N1, SENSOR_RX_PIN, -1);
+  Serial.println("Sensor UART diagnostic enabled: RX=GPIO32, 9600 8N1");
 
   petbotPrefs.begin("petbot", true);
   deviceToken = petbotPrefs.getString("device_token", "");
