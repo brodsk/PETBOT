@@ -120,10 +120,6 @@ void drawFace() {
     );
     display.fillCircle(leftX + 3, eyeY + 1, 4, SSD1306_BLACK);
     display.fillCircle(rightX + 3, eyeY + 1, 4, SSD1306_BLACK);
-    display.drawLine(54, 47, 59, 49, SSD1306_WHITE);
-    display.drawLine(59, 49, 64, 50, SSD1306_WHITE);
-    display.drawLine(64, 50, 69, 49, SSD1306_WHITE);
-    display.drawLine(69, 49, 74, 47, SSD1306_WHITE);
   } else {
     if (mood == "ANNOYED") {
       display.drawLine(
