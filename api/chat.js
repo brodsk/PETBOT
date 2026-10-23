@@ -1,3 +1,18 @@
+const MOOD_RULES = [
+  { mood: "LOVE", re: /(люблю|обнимаю|скучал|скучала|милый|милая|котик|солнышко|❤️|💚|😘)/i },
+  { mood: "HAPPY", re: /(привет|здравствуй|спасибо|класс|круто|ура|молодец|хорошо|отлично|хаха|ахах)/i },
+  { mood: "SURPRISED", re: /[!?]{2,}|(ого|вау|ничего себе|неожиданно|серьёзно|серьезно)/i },
+  { mood: "ANNOYED", re: /(бесит|злюсь|раздражает|ошибка|сломал|сломалось|не работает)/i },
+  { mood: "SLEEPY", re: /(спать|спокойной ночи|устал|устала|сонный|сонная)/i },
+  { mood: "CURIOUS", re: /(почему|как|зачем|что такое|расскажи|объясни|интересно|покажи)/i }
+];
+
+function moodForMessage(message) {
+  const text = String(message || "").toLowerCase();
+  for (const rule of MOOD_RULES) if (rule.re.test(text)) return rule.mood;
+  return "CURIOUS";
+}
+
 const SYSTEM_PROMPT = `Ты PETBOT — маленький робот-компаньон с узнаваемым характером, а не обычный справочник.
 
 ХАРАКТЕР:
@@ -103,7 +118,29 @@ module.exports = async function handler(req, res) {
         error: "Модель не вернула текст. Попробуй ещё раз."
       });
     }
-    return res.status(200).json({ ok: true, reply: reply.trim() });
+    const mood = moodForMessage(cleanMessages[cleanMessages.length - 1].content);
+    // Sync the chat reaction to the state polled by the ESP32.
+    try {
+      const cfgUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const cfgKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (cfgUrl && cfgKey) {
+        const headers = {
+          apikey: cfgKey,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal"
+        };
+        if (!cfgKey.startsWith("sb_secret_")) headers.Authorization = "Bearer " + cfgKey;
+        const stateResponse = await fetch(cfgUrl.replace(/\/$/, "") + "/rest/v1/petbot_state?id=eq.1", {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ desired_mood: mood, updated_at: new Date().toISOString() })
+        });
+        if (!stateResponse.ok) console.error("PETBOT chat mood sync failed:", stateResponse.status);
+      }
+    } catch (syncError) {
+      console.error("PETBOT chat mood sync failed:", syncError && syncError.message);
+    }
+    return res.status(200).json({ ok: true, reply: reply.trim(), mood });
   } catch (error) {
     console.error("PETBOT chat error:", error && error.message ? error.message : "unknown");
     return res.status(500).json({ ok: false, error: "Внутренняя ошибка PETBOT." });
