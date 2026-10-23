@@ -48,6 +48,37 @@ LoRa (433 MHz на текущей плате) намеренно не включ
 
 Моторы намеренно не управляются. Нужны подтверждённый драйвер, отдельное корректное питание и аварийная остановка. Кнопки `Осмотреться`, `Спать` и `Проснуться` пока демонстрируют безопасные облачные команды/эмоции, а не физическое движение.
 
+## Roadmap: PETBOT OS
+
+The next development phase combines PETBOT's existing cloud-controlled personality with selected companion features inspired by projects such as QBIT. PETBOT remains a separate implementation; QBIT firmware and assets are not copied.
+
+### Phase 1 — reliable core
+
+- Keep the LILYGO T3 V1.6.1 / ESP32 firmware compatible with the current OLED wiring and cloud API.
+- Report the actual firmware version in heartbeat data.
+- Preserve the existing device token in NVS and never expose it in the browser or repository.
+- Verify firmware compilation and end-to-end heartbeat/command delivery before adding new hardware features.
+
+### Phase 2 — messages and notifications
+
+- Add a validated, short text-message command to the existing authenticated device API.
+- Show incoming messages on the OLED without blocking Wi-Fi, heartbeat, or command polling.
+- Keep the current expressive face as the default idle screen and return to it after a notification.
+- Record notification events in the existing PETBOT event history.
+
+### Phase 3 — richer personality and controls
+
+- Add a small, versioned animation/gesture catalogue designed for PETBOT's 128x64 OLED and available memory.
+- Add notification history and animation controls to the existing web dashboard.
+- Consider weather, timers, and smart-home integration only after the core interaction is tested.
+
+### Compatibility and safety
+
+- Do not flash QBIT firmware onto the LILYGO board: QBIT targets different hardware and pin assignments.
+- Do not enable LoRa, motors, UV sensing, or battery readings without confirming hardware and testing the implementation.
+- Keep device authentication server-side and do not put secrets in frontend code.
+- Treat every firmware change as untested until it has compiled and been checked on the physical board.
+
 ## Локальная разработка
 
 Проект рассчитан на Vercel. Основная панель — `index.html`, API — `api/`, прошивка — `firmware/`.
