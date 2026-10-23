@@ -50,13 +50,117 @@
     .media-status { font-size:14px;color:var(--muted);min-height:22px }
     footer { margin-top:28px;color:var(--muted);font-size:13px }
     @media(max-width:520px){main{padding:20px 14px 36px}.card{padding:17px}.chatform{flex-direction:column}.chatform button{width:100%}}
+  
+    /* PETBOT redesign: calm, unified, phone-first dashboard */
+    :root {
+      color-scheme: dark;
+      --bg:#080b14; --panel:#111725; --line:#263149; --text:#f3f5ff;
+      --muted:#98a5bf; --accent:#b7f28b; --accent-ink:#14210d;
+    }
+    body {
+      background:
+        radial-gradient(ellipse at 50% -18%, rgba(109,92,255,.22), transparent 48%),
+        radial-gradient(ellipse at 100% 40%, rgba(75,176,157,.08), transparent 34%),
+        var(--bg);
+      letter-spacing:.005em;
+    }
+    main { width:min(1060px,100%); padding:24px 18px 42px; }
+    header { margin-bottom:22px; gap:13px; }
+    .logo {
+      width:54px;height:54px;border-radius:17px;border:1px solid #41496c;
+      background:linear-gradient(145deg,#252d4d,#151c30);
+      box-shadow:0 10px 30px rgba(0,0,0,.22); font-size:27px;
+    }
+    h1 { font-size:clamp(27px,5vw,36px); letter-spacing:.08em; }
+    h2 { font-size:18px; letter-spacing:-.015em; }
+    .sub { font-size:14px; }
+    .grid { grid-template-columns:minmax(0,1.25fr) repeat(2,minmax(0,1fr)); gap:12px; }
+    .card {
+      border:1px solid rgba(139,157,197,.17); border-radius:20px;
+      background:linear-gradient(155deg,rgba(24,32,51,.96),rgba(14,19,32,.98));
+      padding:19px; box-shadow:0 12px 34px rgba(0,0,0,.12);
+    }
+    .grid .card:nth-child(2) {
+      background:radial-gradient(circle at 50% 38%,rgba(115,101,255,.15),transparent 58%),linear-gradient(155deg,#1a2036,#111725);
+    }
+    .label { font-size:11px; letter-spacing:.13em; }
+    .value { font-size:19px; line-height:1.3; margin-top:9px; }
+    .face {
+      width:116px;height:116px;margin:8px auto 12px;padding:0;border-radius:50%;
+      display:grid;place-items:center;font-size:62px;
+      background:radial-gradient(circle at 35% 25%,#39446c,#1b2440 58%,#101626);
+      border:1px solid #4b5680;
+      box-shadow:inset 0 0 24px rgba(155,145,255,.12),0 0 0 8px rgba(113,103,255,.045),0 12px 30px rgba(0,0,0,.25);
+    }
+    .grid .card:nth-child(2) { text-align:center; }
+    .grid .card:nth-child(2) .label { text-align:left; }
+    .grid .card:nth-child(2) .value { font-size:17px; }
+    .grid .card:nth-child(2) .muted { font-size:13px; }
+    .dot { background:var(--accent);box-shadow:0 0 12px rgba(183,242,139,.38); }
+    button {
+      border:1px solid #35415d;
+      background:linear-gradient(180deg,#27334f,#1b263d);
+      border-radius:12px; padding:10px 14px; font-size:14px;
+      transition:transform .16s ease,border-color .16s ease,background .16s ease;
+    }
+    button:active { transform:scale(.98); }
+    button:hover { border-color:#7885aa; }
+    button:disabled { opacity:.45; }
+    .actions { gap:8px; margin-top:15px; }
+    .moods { grid-template-columns:repeat(6,minmax(0,1fr));gap:8px; }
+    .mood-button { border-radius:14px;padding:10px 5px;font-size:12px; }
+    .mood-button[aria-pressed="true"] {
+      background:rgba(183,242,139,.1);border-color:var(--accent);
+      box-shadow:inset 0 0 0 1px rgba(183,242,139,.2);
+    }
+    .mood-emoji { font-size:23px; }
+    .pill { border-color:#303b55;background:#0c1220;font-size:12px; }
+    .chat { margin-top:12px; }
+    #chat-title { display:flex;align-items:center;gap:9px; }
+    #chat-title::before { content:"";width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px rgba(183,242,139,.55); }
+    .chatlog { min-height:110px;max-height:420px;margin:18px 0;gap:12px; }
+    .bubble { padding:12px 15px;border-radius:17px;font-size:15px;line-height:1.55; }
+    .bubble.user { border-color:#3b4c70;background:#263552;border-bottom-right-radius:5px; }
+    .bubble.bot { background:#0c1220;border-color:#252f46;border-bottom-left-radius:5px; }
+    .chatform { padding:7px;border:1px solid #303b55;border-radius:16px;background:#0b101c;gap:8px; }
+    .chatform textarea { border:0;background:transparent;padding:10px;min-height:44px; }
+    .chatform textarea:focus-visible { outline:0; }
+    .chatform button { min-width:112px;background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700; }
+    .media-grid { gap:12px; }
+    .media-panel { border-color:#29344b;border-radius:16px;background:rgba(8,13,23,.72);padding:16px; }
+    .media-panel p { font-size:13px;line-height:1.5; }
+    .media-actions button[aria-pressed="true"] { border-color:var(--accent);background:rgba(183,242,139,.1); }
+    .camera-preview { max-height:360px;border:1px solid #303b55; }
+    .media-status { font-size:13px; }
+    .notice { border-radius:14px;background:rgba(12,18,32,.6);font-size:13px; }
+    footer { text-align:center;padding:12px 0; }
+    @media(max-width:700px) {
+      main { padding:17px 12px 32px; }
+      .grid { grid-template-columns:1fr 1fr; }
+      .grid .card:first-child { grid-column:1/-1; }
+      .grid .card:nth-child(2) { grid-column:1/-1; }
+      .grid .card:nth-child(2) .face { width:104px;height:104px; }
+      .card { padding:16px;border-radius:18px; }
+      .moods { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .mood-button { min-height:70px; }
+      .chatform { flex-direction:row; }
+      .chatform button { width:auto;min-width:92px; }
+      .media-grid { grid-template-columns:1fr; }
+    }
+    @media(max-width:380px) {
+      .grid { grid-template-columns:1fr; }
+      .grid .card:first-child,.grid .card:nth-child(2) { grid-column:auto; }
+      .chatform { flex-direction:column; }
+      .chatform button { width:100%; }
+    }
+
   </style>
 </head>
 <body>
   <main>
     <header>
       <div class="logo" aria-hidden="true">🤖</div>
-      <div><h1>PETBOT</h1><p class="sub">Облачный мозг · Панель управления</p></div>
+      <div><h1>PETBOT</h1><p class="sub">Живой интерфейс · голос, зрение и эмоции</p></div>
     </header>
 
     <section class="grid" aria-label="Состояние робота">
@@ -79,8 +183,8 @@
     </section>
 
     <section class="card" style="margin-top:14px" aria-labelledby="robot-controls-title">
-      <h2 id="robot-controls-title">Настроение и команды PETBOT</h2>
-      <p class="muted">Выбери эмоцию — она сохранится в облаке и появится на OLED, когда плата подключится к Wi-Fi и настроенному API.</p>
+      <h2 id="robot-controls-title">Характер и управление</h2>
+      <p class="muted">Выбери выражение глаз или отправь безопасную команду. Изменения сохраняются в облаке и попадут на OLED при подключении платы.</p>
       <div class="moods" id="moods">
         <button class="mood-button" data-mood="HAPPY" aria-pressed="false"><span class="mood-emoji">😄</span><span>Радость</span></button>
         <button class="mood-button" data-mood="CURIOUS" aria-pressed="true"><span class="mood-emoji">👀</span><span>Любопытство</span></button>
@@ -104,8 +208,8 @@
     </section>
 
     <section class="card chat" aria-labelledby="chat-title">
-      <h2 id="chat-title">Поговорить с PETBOT</h2>
-      <p class="muted">У PETBOT дружелюбный и любопытный характер. Сообщения меняют его настроение; если плата в сети, эмоция появится и на OLED.</p>
+      <h2 id="chat-title">Разговор с PETBOT</h2>
+      <p class="muted">Напиши или скажи что-нибудь. PETBOT ответит, а его настроение синхронизируется с роботом, когда плата в сети.</p>
       <div class="chatlog" id="chatlog" role="log" aria-live="polite">
         <div class="bubble bot">Привет! Я PETBOT 🤖 Пока я живу в облаке, но уже готов с тобой поговорить.</div>
       </div>
@@ -117,18 +221,18 @@
     </section>
 
     <section class="card chat" aria-labelledby="senses-title">
-      <h2 id="senses-title">Уши и глаза PETBOT</h2>
-      <p class="muted">Телефон может слушать голос, отвечать через динамик и показывать изображение с камеры. Оставь эту страницу открытой.</p>
+      <h2 id="senses-title">Голос и зрение</h2>
+      <p class="muted">Включай микрофон и камеру по необходимости. Распознавание лица выполняется на телефоне; видео не отправляется в облако.</p>
       <div class="media-grid">
         <div class="media-panel">
           <div class="label">Микрофон и голос</div>
-          <p>Говори с PETBOT — распознанная речь попадёт в чат, ответ прозвучит через телефон.</p>
+          <p>Говори естественно: распознанная фраза отправится в чат, ответ прозвучит через динамик телефона.</p>
           <div class="media-actions"><button id="voice-toggle" type="button" aria-pressed="false">Включить микрофон</button><button id="voice-stop" type="button">Остановить</button></div>
           <p class="media-status" id="voice-status" role="status" aria-live="polite">Микрофон выключен.</p>
         </div>
         <div class="media-panel">
           <div class="label">Камера</div>
-          <p>Включи камеру. Если браузер поддерживает обнаружение лиц, PETBOT попробует реагировать на появление человека.</p>
+          <p>Камера ищет лицо локально. При обнаружении PETBOT меняет настроение на любопытное.</p>
           <div class="media-actions"><button id="camera-toggle" type="button" aria-pressed="false">Включить камеру</button></div>
           <video id="camera-preview" class="camera-preview" autoplay playsinline muted></video>
           <p class="media-status" id="camera-status" role="status" aria-live="polite">Камера выключена.</p>
@@ -148,7 +252,7 @@
       <p class="muted" id="message" role="status" aria-live="polite">Робот пока не подключён.</p>
     </section>
 
-    <div class="notice">Безопасный режим: эта панель не запускает моторы и не отправляет команды движения. Ключ ИИ хранится только на сервере, не в браузере.</div>
+    <div class="notice">Безопасный режим: панель не запускает моторы и не отправляет команды движения. Ключ ИИ хранится только на сервере. Камера и микрофон активируются только по твоему нажатию.</div>
     <footer>PETBOT · Прототип · История чата сохраняется локально в браузере.</footer>
   </main>
   <script>
