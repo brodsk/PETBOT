@@ -430,7 +430,10 @@
     async function scanForFace() {
       if (!cameraStream || !faceDetector || cameraPreview.readyState < 2) return;
       try {
-        const faces = await faceDetector.detect(cameraPreview);
+        const result = faceDetector.detectForVideo
+          ? faceDetector.detectForVideo(cameraPreview, performance.now())
+          : await faceDetector.detect(cameraPreview);
+        const faces = result.detections || result;
         if (faces.length && !faceSeen && Date.now() - lastFaceMoodAt > 15000) {
           faceSeen = true;
           lastFaceMoodAt = Date.now();
@@ -443,7 +446,7 @@
           cameraStatus.textContent = 'Лицо в кадре 👀';
         }
       } catch (_) {
-        cameraStatus.textContent = 'Камера работает, но обнаружение лица недоступно.';
+        cameraStatus.textContent = 'Камера работает, но не удалось распознать лицо. Проверь интернет и перезапусти камеру.';
       }
     }
 
@@ -475,11 +478,32 @@
         await cameraPreview.play();
         cameraToggle.textContent = 'Выключить камеру';
         cameraToggle.setAttribute('aria-pressed', 'true');
-        if ('FaceDetector' in window) {
-          try { faceDetector = new FaceDetector({ fastMode: true, maxDetectedFaces: 3 }); } catch (_) { faceDetector = null; }
+        cameraStatus.textContent = 'Загружаю распознавание лиц…';
+        try {
+          if (!window.visionTasksPromise) {
+            window.visionTasksPromise = import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm')
+              .then(async (vision) => {
+                const files = await vision.FilesetResolver.forVisionTasks(
+                  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+                );
+                return vision.FaceDetector.createFromOptions(files, {
+                  baseOptions: {
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+                    delegate: 'GPU'
+                  },
+                  runningMode: 'VIDEO',
+                  minDetectionConfidence: 0.55
+                });
+              });
+          }
+          faceDetector = await window.visionTasksPromise;
+          cameraStatus.textContent = 'Камера включена. Ищу лицо…';
+          faceTimer = setInterval(scanForFace, 700);
+        } catch (error) {
+          faceDetector = null;
+          cameraStatus.textContent = 'Видео работает, но не загрузилась модель распознавания. Проверь интернет и выключи/включи камеру.';
+          console.error('PETBOT face detector:', error);
         }
-        cameraStatus.textContent = faceDetector ? "Камера включена. Ищу лицо…" : "Камера включена. Автообнаружение лиц в этом браузере не поддерживается.";
-        if (faceDetector) faceTimer = setInterval(scanForFace, 1200);
       } catch (error) {
         cameraStatus.textContent = error.name === 'NotAllowedError' ? 'Доступ запрещён. Разреши камеру для сайта.' : 'Не удалось включить камеру: ' + error.message;
         if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
