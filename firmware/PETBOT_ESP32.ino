@@ -16,7 +16,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.0-ir-digital";
+const char* FIRMWARE_VERSION = "petbot-1.1-expressions";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -114,18 +114,15 @@ void drawFace() {
         rightX, eyeY + 13, SSD1306_WHITE
     );
   } else if (mood == "HAPPY") {
-    // Happy uses the same rounded eye style as the other expressions,
-    // with a tiny upward smile underneath.
-    display.fillRoundRect(
-        leftX - eyeW / 2, eyeY - eyeH / 2,
-        eyeW, eyeH, 8, SSD1306_WHITE
-    );
-    display.fillRoundRect(
-        rightX - eyeW / 2, eyeY - eyeH / 2,
-        eyeW, eyeH, 8, SSD1306_WHITE
-    );
-    display.fillCircle(leftX + 3, eyeY + 1, 4, SSD1306_BLACK);
-    display.fillCircle(rightX + 3, eyeY + 1, 4, SSD1306_BLACK);
+    // Happy: cheerful crescent eyes, visibly different from curious.
+    display.drawLine(leftX - 11, eyeY + 4, leftX - 6, eyeY - 3, SSD1306_WHITE);
+    display.drawLine(leftX - 6, eyeY - 3, leftX, eyeY - 6, SSD1306_WHITE);
+    display.drawLine(leftX, eyeY - 6, leftX + 6, eyeY - 3, SSD1306_WHITE);
+    display.drawLine(leftX + 6, eyeY - 3, leftX + 11, eyeY + 4, SSD1306_WHITE);
+    display.drawLine(rightX - 11, eyeY + 4, rightX - 6, eyeY - 3, SSD1306_WHITE);
+    display.drawLine(rightX - 6, eyeY - 3, rightX, eyeY - 6, SSD1306_WHITE);
+    display.drawLine(rightX, eyeY - 6, rightX + 6, eyeY - 3, SSD1306_WHITE);
+    display.drawLine(rightX + 6, eyeY - 3, rightX + 11, eyeY + 4, SSD1306_WHITE);
   } else {
     if (mood == "ANNOYED") {
       display.drawLine(
@@ -147,8 +144,13 @@ void drawFace() {
         eyeW, eyeH, 8, SSD1306_WHITE
     );
 
-    display.fillCircle(leftX + 3, eyeY + 1, 4, SSD1306_BLACK);
-    display.fillCircle(rightX + 3, eyeY + 1, 4, SSD1306_BLACK);
+    int leftPupilX = leftX + 3;
+    int rightPupilX = rightX + 3;
+    int pupilY = eyeY + 1;
+    if (mood == "CURIOUS") { pupilY = eyeY - 3; leftPupilX -= 2; rightPupilX -= 2; }
+    if (mood == "ANNOYED") { pupilY = eyeY + 5; }
+    display.fillCircle(leftPupilX, pupilY, 4, SSD1306_BLACK);
+    display.fillCircle(rightPupilX, pupilY, 4, SSD1306_BLACK);
   }
 
   display.display();
@@ -406,7 +408,7 @@ void updateAutonomousMood() {
   const bool connected = WiFi.status() == WL_CONNECTED;
 
   if (nextAutonomousMoodAt == 0) {
-    nextAutonomousMoodAt = now + 7000UL + (esp_random() % 7000UL);
+    nextAutonomousMoodAt = now + 3000UL + (esp_random() % 3000UL);
   }
 
   if (!connected) {
@@ -430,7 +432,7 @@ void updateAutonomousMood() {
       mood = next;
       lastActivity = now;
       // Expressions last a little different amount of time for a less robotic feel.
-      nextAutonomousMoodAt = now + 9000UL + (esp_random() % 15000UL);
+      nextAutonomousMoodAt = now + 4000UL + (esp_random() % 5000UL);
       drawFace();
       Serial.println("Autonomous mood: " + mood);
     }
@@ -477,10 +479,10 @@ void loop() {
     }
   }
 
-  if (nextBlinkAt == 0) nextBlinkAt = millis() + 2500UL;
+  if (nextBlinkAt == 0) nextBlinkAt = millis() + 1200UL;
   if ((long)(millis() - nextBlinkAt) >= 0) {
     lastBlink = millis();
-    nextBlinkAt = millis() + 2500UL + (esp_random() % 4200UL);
+    nextBlinkAt = millis() + 1200UL + (esp_random() % 2200UL);
 
     eyesOpen = false;
     drawFace();
