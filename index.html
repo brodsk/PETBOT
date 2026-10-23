@@ -60,14 +60,14 @@
       </article>
       <article class="card">
         <div class="label">Настроение</div>
-        <div class="face" aria-label="Нейтральное лицо">◡</div>
-        <div class="value">Любопытный</div>
-        <p class="muted">Пока демонстрационный статус</p>
+        <div class="face" id="mood-face" aria-label="Эмоция PETBOT">👀</div>
+        <div class="value" id="mood-value">Проверяем настроение…</div>
+        <p class="muted" id="mood-detail">Настроение синхронизируется с роботом</p>
       </article>
       <article class="card">
         <div class="label">Аппаратное состояние</div>
-        <div class="value">Не подключён</div>
-        <p class="muted">LILYGO T3 / ESP32 подключим на следующем этапе</p>
+        <div class="value" id="hardware-value">Проверяем…</div>
+        <p class="muted" id="hardware-detail">Реальный статус платы определяется по сигналам ESP32</p>
       </article>
     </section>
 
@@ -98,7 +98,7 @@
 
     <section class="card chat" aria-labelledby="chat-title">
       <h2 id="chat-title">Поговорить с PETBOT</h2>
-      <p class="muted">У PETBOT дружелюбный и любопытный характер. Пока он существует в облаке и не получает данные с физических датчиков.</p>
+      <p class="muted">У PETBOT дружелюбный и любопытный характер. Сообщения меняют его настроение; если плата в сети, эмоция появится и на OLED.</p>
       <div class="chatlog" id="chatlog" role="log" aria-live="polite">
         <div class="bubble bot">Привет! Я PETBOT 🤖 Пока я живу в облаке, но уже готов с тобой поговорить.</div>
       </div>
@@ -121,7 +121,7 @@
     </section>
 
     <div class="notice">Безопасный режим: эта панель не запускает моторы и не отправляет команды движения. Ключ ИИ хранится только на сервере, не в браузере.</div>
-    <footer>PETBOT · Прототип · История чата сохраняется локально в браузере; ESP32 пока не подключена.</footer>
+    <footer>PETBOT · Прототип · История чата сохраняется локально в браузере.</footer>
   </main>
   <script>
     const connection = document.getElementById('connection');
@@ -134,8 +134,14 @@
     const controlStatus = document.getElementById('control-status');
     const devicePill = document.getElementById('device-pill');
     const cloudPill = document.getElementById('cloud-pill');
+    const moodValue = document.getElementById('mood-value');
+    const moodFace = document.getElementById('mood-face');
+    const moodDetail = document.getElementById('mood-detail');
+    const hardwareValue = document.getElementById('hardware-value');
+    const hardwareDetail = document.getElementById('hardware-detail');
     const eventList = document.getElementById('event-list');
     const moodLabels = { HAPPY: 'Радость', CURIOUS: 'Любопытство', SLEEPY: 'Сонный', SURPRISED: 'Удивление', ANNOYED: 'Недовольство', LOVE: 'Симпатия' };
+    const moodFaces = { HAPPY: '😊', CURIOUS: '👀', SLEEPY: '😴', SURPRISED: '😮', ANNOYED: '😠', LOVE: '💚' };
     const HISTORY_KEY = 'petbot-chat-history-v1';
     let history = loadHistory();
 
@@ -178,7 +184,11 @@
         detail.textContent = 'Сервис отвечает · ' + data.service + ' · версия ' + (data.version || 'unknown');
         devicePill.textContent = data.robotConnected ? 'Плата на связи' : 'Плата не подключена';
         cloudPill.textContent = data.cloudControlConfigured ? 'Облачное управление настроено' : 'Нужно настроить облачную связь';
-        if (data.mood) setMoodSelected(data.mood);
+        if (data.mood) updateMoodDisplay(data.mood);
+        hardwareValue.textContent = data.robotConnected ? 'На связи' : 'Ожидает подключения';
+        hardwareDetail.textContent = data.robotConnected
+          ? 'LILYGO T3 / ESP32 · прошивка ' + ((data.deviceInfo && data.deviceInfo.firmware) || 'определена')
+          : 'Последний сигнал от платы не получен в течение 30 секунд';
         if (data.robotConnected && data.lastSeen) {
           controlStatus.textContent = 'Плата на связи. Последний сигнал: ' + new Date(data.lastSeen).toLocaleString();
         } else if (!data.cloudControlConfigured) {
@@ -192,6 +202,14 @@
         detail.textContent = 'После деплоя нажмите «Проверить связь» ещё раз.';
         message.textContent = 'Не удалось проверить API: ' + error.message;
       }
+    }
+
+    function updateMoodDisplay(mood) {
+      if (!moodLabels[mood]) return;
+      setMoodSelected(mood);
+      moodValue.textContent = moodLabels[mood];
+      moodFace.textContent = moodFaces[mood] || '🤖';
+      moodDetail.textContent = 'Текущее настроение PETBOT · ' + mood;
     }
 
     function setMoodSelected(mood) {
@@ -210,7 +228,7 @@
         });
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(data.error || 'Не удалось сохранить команду.');
-        if (payload.mood) setMoodSelected(payload.mood);
+        if (payload.mood) updateMoodDisplay(payload.mood);
         controlStatus.textContent = data.message || 'Команда сохранена в облаке.';
         eventList.replaceChildren();
         const item = document.createElement('li');
@@ -267,6 +285,7 @@
           throw new Error((data.error || 'Не удалось получить ответ.') + diagnostics);
         }
         addBubble('assistant', data.reply);
+        if (data.mood) updateMoodDisplay(data.mood);
         history.push({ role: 'assistant', content: data.reply });
         while (history.length > 10) history.shift();
         saveHistory();
