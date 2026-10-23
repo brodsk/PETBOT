@@ -31,7 +31,7 @@ bool displayReady = false;
 
 String jsonStringField(const String& json, const String& key) {
   String needle = "\"" + key + "\"";
-  int keyAt = json.indexOf(needle);
+  int keyAt = key == "command" ? json.lastIndexOf(needle) : json.indexOf(needle);
   if (keyAt < 0) return "";
   int colon = json.indexOf(':', keyAt + needle.length());
   if (colon < 0) return "";
