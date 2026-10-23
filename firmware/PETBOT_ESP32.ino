@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v0.6
+  PETBOT firmware v0.7
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: OLED face, autonomous moods, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -16,7 +16,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-0.6";
+const char* FIRMWARE_VERSION = "petbot-0.7";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -106,17 +106,20 @@ void drawFace() {
         rightX, eyeY + 13, SSD1306_WHITE
     );
   } else if (mood == "HAPPY") {
-    // HAPPY: smiling closed eyes, clearly different from open CURIOUS eyes.
-    display.drawLine(leftX - 11, eyeY + 2, leftX - 5, eyeY - 5, SSD1306_WHITE);
-    display.drawLine(leftX - 5, eyeY - 5, leftX + 1, eyeY + 2, SSD1306_WHITE);
-    display.drawLine(leftX + 1, eyeY + 2, leftX + 8, eyeY - 5, SSD1306_WHITE);
-    display.drawLine(leftX + 8, eyeY - 5, leftX + 12, eyeY + 2, SSD1306_WHITE);
-    display.drawLine(rightX - 12, eyeY + 2, rightX - 8, eyeY - 5, SSD1306_WHITE);
-    display.drawLine(rightX - 8, eyeY - 5, rightX - 1, eyeY + 2, SSD1306_WHITE);
-    display.drawLine(rightX - 1, eyeY + 2, rightX + 5, eyeY - 5, SSD1306_WHITE);
-    display.drawLine(rightX + 5, eyeY - 5, rightX + 11, eyeY + 2, SSD1306_WHITE);
-    display.drawLine(51, 43, 64, 48, SSD1306_WHITE);
-    display.drawLine(64, 48, 77, 43, SSD1306_WHITE);
+    // Friendly curved smiling eyes.
+    display.drawLine(leftX - 11, eyeY + 1, leftX - 7, eyeY - 4, SSD1306_WHITE);
+    display.drawLine(leftX - 7, eyeY - 4, leftX - 2, eyeY - 6, SSD1306_WHITE);
+    display.drawLine(leftX - 2, eyeY - 6, leftX + 3, eyeY - 4, SSD1306_WHITE);
+    display.drawLine(leftX + 3, eyeY - 4, leftX + 8, eyeY + 1, SSD1306_WHITE);
+    display.drawLine(rightX - 11, eyeY + 1, rightX - 7, eyeY - 4, SSD1306_WHITE);
+    display.drawLine(rightX - 7, eyeY - 4, rightX - 2, eyeY - 6, SSD1306_WHITE);
+    display.drawLine(rightX - 2, eyeY - 6, rightX + 3, eyeY - 4, SSD1306_WHITE);
+    display.drawLine(rightX + 3, eyeY - 4, rightX + 8, eyeY + 1, SSD1306_WHITE);
+    // Subtle smile.
+    display.drawLine(53, 44, 58, 47, SSD1306_WHITE);
+    display.drawLine(58, 47, 64, 48, SSD1306_WHITE);
+    display.drawLine(64, 48, 70, 47, SSD1306_WHITE);
+    display.drawLine(70, 47, 75, 44, SSD1306_WHITE);
   } else {
     if (mood == "ANNOYED") {
       display.drawLine(
@@ -142,10 +145,6 @@ void drawFace() {
     display.fillCircle(rightX + 3, eyeY + 1, 4, SSD1306_BLACK);
   }
 
-  display.setTextSize(1);
-  display.setCursor(0, 54);
-  display.print("Mood: ");
-  display.print(mood);
   display.display();
 }
 
