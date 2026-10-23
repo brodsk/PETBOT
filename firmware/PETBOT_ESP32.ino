@@ -156,7 +156,8 @@ void drawFace() {
     int leftPupilX = leftX + 3;
     int rightPupilX = rightX + 3;
     int pupilY = eyeY + 1;
-    if (mood == "CURIOUS") { pupilY = eyeY - 3; leftPupilX -= 2; rightPupilX -= 2; }\n    leftPupilX += glanceX; rightPupilX += glanceX; pupilY += glanceY;
+    if (mood == "CURIOUS") { pupilY = eyeY - 3; leftPupilX -= 2; rightPupilX -= 2; }
+    leftPupilX += glanceX; rightPupilX += glanceX; pupilY += glanceY;
     if (mood == "ANNOYED") { pupilY = eyeY + 5; }
     display.fillCircle(leftPupilX, pupilY, 4, SSD1306_BLACK);
     display.fillCircle(rightPupilX, pupilY, 4, SSD1306_BLACK);
@@ -516,7 +517,8 @@ void loop() {
   }
 
   // Serial RX is intentionally disabled because GPIO3 is the IR sensor input.
-  updateAutonomousMood();\n  updateMicroAction();
+  updateAutonomousMood();
+  updateMicroAction();
 
   if (WiFi.status() != WL_CONNECTED) {
     static unsigned long lastWifiRetry = 0;
