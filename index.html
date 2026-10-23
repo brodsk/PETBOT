@@ -34,6 +34,13 @@
     .bubble.bot { align-self:flex-start;background:#111a2c }
     .chatform { display:flex;gap:10px;align-items:stretch }
     .chatform textarea { flex:1;min-width:0;resize:vertical;min-height:48px;max-height:140px;border:1px solid #405274;border-radius:12px;background:#0d1527;color:var(--text);padding:12px;font:inherit }
+    .moods { display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:9px;margin-top:14px }
+    .mood-button { display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px }
+    .mood-button[aria-pressed="true"] { border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset }
+    .mood-emoji { font-size:25px }
+    .device-status { display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px }
+    .pill { border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);font-size:13px }
+    .event-list { margin:12px 0 0;padding-left:20px;color:var(--muted);font-size:14px }
     footer { margin-top:28px;color:var(--muted);font-size:13px }
     @media(max-width:520px){main{padding:20px 14px 36px}.card{padding:17px}.chatform{flex-direction:column}.chatform button{width:100%}}
   </style>
@@ -62,6 +69,31 @@
         <div class="value">Не подключён</div>
         <p class="muted">LILYGO T3 / ESP32 подключим на следующем этапе</p>
       </article>
+    </section>
+
+    <section class="card" style="margin-top:14px" aria-labelledby="robot-controls-title">
+      <h2 id="robot-controls-title">Настроение и команды PETBOT</h2>
+      <p class="muted">Выбери эмоцию — она сохранится в облаке и появится на OLED, когда плата подключится к Wi-Fi и настроенному API.</p>
+      <div class="moods" id="moods">
+        <button class="mood-button" data-mood="HAPPY" aria-pressed="false"><span class="mood-emoji">😄</span><span>Радость</span></button>
+        <button class="mood-button" data-mood="CURIOUS" aria-pressed="true"><span class="mood-emoji">👀</span><span>Любопытство</span></button>
+        <button class="mood-button" data-mood="SLEEPY" aria-pressed="false"><span class="mood-emoji">😴</span><span>Сонный</span></button>
+        <button class="mood-button" data-mood="SURPRISED" aria-pressed="false"><span class="mood-emoji">😮</span><span>Удивление</span></button>
+        <button class="mood-button" data-mood="ANNOYED" aria-pressed="false"><span class="mood-emoji">😠</span><span>Недовольство</span></button>
+        <button class="mood-button" data-mood="LOVE" aria-pressed="false"><span class="mood-emoji">💚</span><span>Симпатия</span></button>
+      </div>
+      <div class="actions">
+        <button type="button" data-command="PING">Проверить робота</button>
+        <button type="button" data-command="LOOK_AROUND">Осмотреться</button>
+        <button type="button" data-command="SLEEP">Спать</button>
+        <button type="button" data-command="WAKE">Проснуться</button>
+      </div>
+      <div class="device-status">
+        <span class="pill" id="device-pill">Плата не подключена</span>
+        <span class="pill" id="cloud-pill">Облачное управление: проверка…</span>
+      </div>
+      <p class="muted" id="control-status" role="status" aria-live="polite">Команды движения отключены до установки драйвера моторов и проверки питания.</p>
+      <ul class="event-list" id="event-list"><li>События робота появятся здесь после подключения.</li></ul>
     </section>
 
     <section class="card chat" aria-labelledby="chat-title">
@@ -99,6 +131,11 @@
     const chatinput = document.getElementById('chatinput');
     const chatstatus = document.getElementById('chatstatus');
     const send = document.getElementById('send');
+    const controlStatus = document.getElementById('control-status');
+    const devicePill = document.getElementById('device-pill');
+    const cloudPill = document.getElementById('cloud-pill');
+    const eventList = document.getElementById('event-list');
+    const moodLabels = { HAPPY: 'Радость', CURIOUS: 'Любопытство', SLEEPY: 'Сонный', SURPRISED: 'Удивление', ANNOYED: 'Недовольство', LOVE: 'Симпатия' };
     const HISTORY_KEY = 'petbot-chat-history-v1';
     let history = loadHistory();
 
@@ -138,14 +175,59 @@
         const data = await response.json();
         if (!response.ok || data.ok !== true) throw new Error('API вернул ошибку');
         connection.textContent = 'Облако работает';
-        detail.textContent = 'Сервис отвечает · ' + data.service;
-        message.textContent = 'API доступен. Сам робот пока не подключён.';
+        detail.textContent = 'Сервис отвечает · ' + data.service + ' · версия ' + (data.version || 'unknown');
+        devicePill.textContent = data.robotConnected ? 'Плата на связи' : 'Плата не подключена';
+        cloudPill.textContent = data.cloudControlConfigured ? 'Облачное управление настроено' : 'Нужно настроить облачную связь';
+        if (data.mood) setMoodSelected(data.mood);
+        if (data.robotConnected && data.lastSeen) {
+          controlStatus.textContent = 'Плата на связи. Последний сигнал: ' + new Date(data.lastSeen).toLocaleString();
+        } else if (!data.cloudControlConfigured) {
+          controlStatus.textContent = 'Панель уже готова, но для связи сайта и ESP32 нужно добавить переменные окружения Vercel и настроить прошивку.';
+        } else {
+          controlStatus.textContent = 'Облако готово. Плата ещё не отправляла heartbeat.';
+        }
+        message.textContent = data.robotConnected ? 'PETBOT подключён.' : 'Облако доступно; физическая плата пока не подключена.';
       } catch (error) {
         connection.textContent = 'API недоступен';
         detail.textContent = 'После деплоя нажмите «Проверить связь» ещё раз.';
         message.textContent = 'Не удалось проверить API: ' + error.message;
       }
     }
+
+    function setMoodSelected(mood) {
+      document.querySelectorAll('[data-mood]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.mood === mood));
+      });
+    }
+
+    async function sendRobotAction(payload) {
+      controlStatus.textContent = 'Отправляю команду в облако…';
+      try {
+        const response = await fetch('/api/device/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Не удалось сохранить команду.');
+        if (payload.mood) setMoodSelected(payload.mood);
+        controlStatus.textContent = data.message || 'Команда сохранена в облаке.';
+        eventList.replaceChildren();
+        const item = document.createElement('li');
+        item.textContent = new Date().toLocaleTimeString() + ' · ' + (payload.mood ? 'Настроение: ' + (moodLabels[payload.mood] || payload.mood) : 'Команда: ' + payload.command);
+        eventList.appendChild(item);
+        await checkApi();
+      } catch (error) {
+        controlStatus.textContent = error.message || 'Ошибка отправки команды.';
+      }
+    }
+
+    document.querySelectorAll('[data-mood]').forEach(button => {
+      button.addEventListener('click', () => sendRobotAction({ mood: button.dataset.mood }));
+    });
+    document.querySelectorAll('[data-command]').forEach(button => {
+      button.addEventListener('click', () => sendRobotAction({ command: button.dataset.command }));
+    });
 
     function addBubble(role, text) {
       const bubble = document.createElement('div');
