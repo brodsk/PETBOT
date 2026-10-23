@@ -13,6 +13,7 @@
     header { display:flex; align-items:center; gap:14px; margin-bottom:26px }
     .logo { width:58px;height:58px;border:1px solid #405274;border-radius:18px;display:grid;place-items:center;background:#202e47;font-size:29px }
     h1 { font-size:clamp(25px,5vw,38px); margin:0; letter-spacing:.04em }
+    h2 { margin:0 0 6px;font-size:21px }
     .sub,.muted { color:var(--muted) }
     .sub { margin:2px 0 0 }
     .grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px }
@@ -22,11 +23,19 @@
     .dot { display:inline-block;width:9px;height:9px;border-radius:50%;background:#f6c453;margin-right:8px }
     .face { font-size:76px;line-height:1.25;text-align:center;padding:14px }
     button { border:1px solid #4a5c7d;background:#253653;color:var(--text);padding:11px 15px;border-radius:12px;font:inherit;cursor:pointer }
-    button:focus-visible { outline:2px solid var(--accent);outline-offset:3px }
+    button:focus-visible,input:focus-visible,textarea:focus-visible { outline:2px solid var(--accent);outline-offset:3px }
+    button:disabled { opacity:.55;cursor:wait }
     .actions { display:flex;gap:10px;flex-wrap:wrap;margin-top:18px }
     .notice { margin-top:16px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;color:var(--muted) }
+    .chat { margin-top:14px }
+    .chatlog { display:flex;flex-direction:column;gap:10px;max-height:360px;overflow:auto;margin:16px 0;padding:2px }
+    .bubble { padding:11px 14px;border:1px solid var(--line);border-radius:14px;white-space:pre-wrap;overflow-wrap:anywhere;max-width:92% }
+    .bubble.user { align-self:flex-end;background:#243654 }
+    .bubble.bot { align-self:flex-start;background:#111a2c }
+    .chatform { display:flex;gap:10px;align-items:stretch }
+    .chatform textarea { flex:1;min-width:0;resize:vertical;min-height:48px;max-height:140px;border:1px solid #405274;border-radius:12px;background:#0d1527;color:var(--text);padding:12px;font:inherit }
     footer { margin-top:28px;color:var(--muted);font-size:13px }
-    @media(max-width:520px){main{padding:20px 14px 36px}.card{padding:17px}}
+    @media(max-width:520px){main{padding:20px 14px 36px}.card{padding:17px}.chatform{flex-direction:column}.chatform button{width:100%}}
   </style>
 </head>
 <body>
@@ -55,9 +64,22 @@
       </article>
     </section>
 
+    <section class="card chat" aria-labelledby="chat-title">
+      <h2 id="chat-title">Поговорить с PETBOT</h2>
+      <p class="muted">У PETBOT дружелюбный и любопытный характер. Пока он существует в облаке и не получает данные с физических датчиков.</p>
+      <div class="chatlog" id="chatlog" role="log" aria-live="polite">
+        <div class="bubble bot">Привет! Я PETBOT 🤖 Пока я живу в облаке, но уже готов с тобой поговорить.</div>
+      </div>
+      <form class="chatform" id="chatform">
+        <textarea id="chatinput" maxlength="2000" rows="2" placeholder="Напиши PETBOT…" aria-label="Сообщение для PETBOT" required></textarea>
+        <button id="send" type="submit">Отправить</button>
+      </form>
+      <p class="muted" id="chatstatus" role="status" aria-live="polite">Если ИИ ещё не настроен, сервер сообщит, какую настройку добавить.</p>
+    </section>
+
     <section class="card" style="margin-top:14px">
       <div class="label">Быстрые действия</div>
-      <p>Сначала поднимем безопасный канал связи. Реальные команды движения появятся после подключения платы и проверки драйвера моторов.</p>
+      <p>Реальные команды движения появятся после подключения платы и проверки драйвера моторов.</p>
       <div class="actions">
         <button id="refresh" type="button">Проверить связь</button>
         <button id="events" type="button">Показать статус</button>
@@ -65,13 +87,19 @@
       <p class="muted" id="message" role="status" aria-live="polite">Робот пока не подключён.</p>
     </section>
 
-    <div class="notice">Безопасный режим: эта стартовая панель не запускает моторы и не отправляет команды движения.</div>
-    <footer>PETBOT · Начальная версия · Секретные ключи будут храниться только на сервере.</footer>
+    <div class="notice">Безопасный режим: эта панель не запускает моторы и не отправляет команды движения. Ключ ИИ хранится только на сервере, не в браузере.</div>
+    <footer>PETBOT · Прототип · Следующий этап — подключить ИИ и затем ESP32.</footer>
   </main>
   <script>
     const connection = document.getElementById('connection');
     const detail = document.getElementById('api-detail');
     const message = document.getElementById('message');
+    const chatlog = document.getElementById('chatlog');
+    const chatinput = document.getElementById('chatinput');
+    const chatstatus = document.getElementById('chatstatus');
+    const send = document.getElementById('send');
+    const history = [];
+
     async function checkApi() {
       connection.textContent = 'Проверяем…';
       detail.textContent = 'Запрос /api/health';
@@ -88,6 +116,46 @@
         message.textContent = 'Не удалось проверить API: ' + error.message;
       }
     }
+
+    function addBubble(role, text) {
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble ' + (role === 'user' ? 'user' : 'bot');
+      bubble.textContent = text;
+      chatlog.appendChild(bubble);
+      chatlog.scrollTop = chatlog.scrollHeight;
+    }
+
+    document.getElementById('chatform').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const text = chatinput.value.trim();
+      if (!text || send.disabled) return;
+      addBubble('user', text);
+      history.push({ role: 'user', content: text });
+      while (history.length > 10) history.shift();
+      chatinput.value = '';
+      send.disabled = true;
+      chatstatus.textContent = 'PETBOT думает…';
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ messages: history })
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok !== true) throw new Error(data.error || 'Не удалось получить ответ.');
+        addBubble('assistant', data.reply);
+        history.push({ role: 'assistant', content: data.reply });
+        while (history.length > 10) history.shift();
+        chatstatus.textContent = 'Ответ получен.';
+      } catch (error) {
+        history.pop();
+        chatstatus.textContent = error.message || 'Ошибка соединения с PETBOT.';
+      } finally {
+        send.disabled = false;
+        chatinput.focus();
+      }
+    });
+
     document.getElementById('refresh').addEventListener('click', checkApi);
     document.getElementById('events').addEventListener('click', () => {
       message.textContent = 'Статус: веб-панель запущена; плата и датчики ещё не подключены.';
