@@ -43,6 +43,8 @@ unsigned long nextAutonomousMoodAt = 0;
 unsigned long nextMicroActionAt = 0;
 unsigned long microActionUntil = 0;
 String microAction = "";
+String notificationMessage = "";
+unsigned long notificationUntil = 0;
 float gazeX = 0.0f;
 float gazeY = 0.0f;
 float gazeTargetX = 0.0f;
@@ -77,6 +79,26 @@ void drawFace() {
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
   display.setCursor(0, 0);
+
+  if (notificationMessage.length() && (long)(notificationUntil - millis()) > 0) {
+    display.println("PETBOT MESSAGE");
+    display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+    String remaining = notificationMessage;
+    int lines = 0;
+    while (remaining.length() && lines < 4) {
+      int cut = remaining.length() > 21 ? 21 : remaining.length();
+      if (cut < remaining.length()) {
+        int spaceAt = remaining.lastIndexOf(' ', cut);
+        if (spaceAt > 0) cut = spaceAt;
+      }
+      display.println(remaining.substring(0, cut));
+      remaining = remaining.substring(cut);
+      remaining.trim();
+      lines++;
+    }
+    display.display();
+    return;
+  }
 
   display.print("PETBOT  ");
   display.print(
@@ -250,7 +272,15 @@ void pollCloud() {
 
   String command = jsonStringField(response, "command");
 
-  if (command.length()) {
+  if (command == "MESSAGE") {
+    notificationMessage = jsonStringField(response, "message");
+    if (notificationMessage.length()) {
+      notificationUntil = millis() + 6000UL;
+      lastActivity = millis();
+      Serial.println("Cloud notification received.");
+      drawFace();
+    }
+  } else if (command.length()) {
     Serial.println("Cloud command: " + command);
 
     lastActivity = millis();
@@ -494,6 +524,10 @@ void updateAutonomousMood() {
 
 void loop() {
   handleSerialProvisioning();
+  if (notificationMessage.length() && (long)(millis() - notificationUntil) >= 0) {
+    notificationMessage = "";
+    drawFace();
+  }
   updateAutonomousMood();
   updateMicroAction();
 
