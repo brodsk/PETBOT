@@ -23,12 +23,31 @@ module.exports = async function handler(req, res) {
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify(patch)
     });
-    await db("petbot_events", {
-      method: "POST",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ event_type: MOODS.has(mood) ? "mood_changed" : "command_queued", payload: MOODS.has(mood) ? { mood } : { command } })
+
+    // Event history is secondary: a logging failure must not report the
+    // whole command as failed after the desired state was already saved.
+    try {
+      await db("petbot_events", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          event_type: MOODS.has(mood) ? "mood_changed" : "command_queued",
+          payload: MOODS.has(mood) ? { mood } : { command }
+        })
+      });
+    } catch (eventError) {
+      console.error("PETBOT event logging failed; state update succeeded", {
+        status: eventError.statusCode || 500
+      });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      mood: MOODS.has(mood) ? mood : undefined,
+      command: allowedCommands.has(command) ? command : undefined,
+      delivered: false,
+      message: "Команда сохранена. Она выполнится, когда плата будет подключена к облаку."
     });
-    return res.status(200).json({ ok: true, mood: MOODS.has(mood) ? mood : undefined, command: allowedCommands.has(command) ? command : undefined, delivered: false, message: "Команда сохранена. Она выполнится, когда плата будет подключена к облаку." });
   } catch (error) {
     return jsonError(res, error);
   }
