@@ -1,16 +1,15 @@
 /*
-  PETBOT firmware v0.2 — LILYGO T3 V1.6.1 / ESP32
-  OLED moods + Wi-Fi cloud polling. LoRa and motors intentionally disabled.
-  Install Adafruit GFX Library and Adafruit SSD1306 in Arduino IDE.
+  PETBOT firmware v0.4 — LILYGO T3 V1.6.1 / ESP32
+  Autonomous moods + Wi-Fi captive-portal onboarding. Motors remain disabled.
+  Install Adafruit GFX, Adafruit SSD1306 and WiFiManager libraries in Arduino IDE.
 */
 #include <WiFi.h>
+#include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-const char* WIFI_SSID = "YOUR_WIFI_NAME";
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 const char* DEVICE_TOKEN = "PASTE_PETBOT_DEVICE_TOKEN_HERE";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
@@ -151,9 +150,48 @@ void setup() {
   if (displayReady) drawFace();
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.setAutoReconnect(true);
+  WiFiManager wifiManager;
+  wifiManager.setConfigPortalTimeout(0); // Keep setup AP available until Wi-Fi is configured.
+  wifiManager.setConnectTimeout(25);
+  wifiManager.setTitle("PETBOT Wi-Fi setup");
+  Serial.println("PETBOT firmware v0.4 starting Wi-Fi provisioning");
+  if (displayReady) {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("PETBOT");
+    display.println("Wi-Fi setup");
+    display.println("AP: PETBOT-Setup");
+    display.println("Pass: PETBOT-4827");
+    display.println("Open 192.168.4.1");
+    display.display();
+  }
+  // First boot: connect to PETBOT-Setup from a phone/laptop, then open
+  // http://192.168.4.1 and save the home Wi-Fi credentials. WiFiManager
+  // persists them in ESP32 NVS; subsequent boots reconnect automatically.
+  bool connected = wifiManager.autoConnect("PETBOT-Setup", "PETBOT-4827");
+  if (!connected) {
+    Serial.println("Wi-Fi setup did not complete; restarting");
+    delay(1000);
+    ESP.restart();
+  }
+  Serial.println("Wi-Fi connected: " + WiFi.SSID());
   lastActivity = millis();
-  Serial.println("PETBOT firmware v0.3 autonomous emotion engine starting");
+  wifiWasConnected = true;
+  if (displayReady) {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("PETBOT online");
+    display.println(WiFi.SSID());
+    display.println(WiFi.localIP());
+    display.display();
+    delay(1800);
+  }
+  drawFace();
 }
 
 void updateAutonomousMood() {
