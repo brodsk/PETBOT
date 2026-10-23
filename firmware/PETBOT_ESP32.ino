@@ -303,6 +303,8 @@ void handleSerialProvisioning() {
         String("Wi-Fi connected: ") +
         (WiFi.status() == WL_CONNECTED ? "YES" : "NO")
     );
+  } else if (line.length()) {
+    Serial.println("RXD SENSOR DATA: " + line);
   }
 }
 
