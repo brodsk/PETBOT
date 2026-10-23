@@ -224,8 +224,7 @@ void loop() {
     static unsigned long lastWifiRetry = 0;
     if (millis() - lastWifiRetry > 15000) {
       lastWifiRetry = millis();
-      WiFi.disconnect();
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      WiFi.reconnect();
     }
   } else {
     if (millis() - lastPoll >= 5000) {
