@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v0.9 sensor diagnostic
+  PETBOT firmware v0.9 RXD sensor test
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, randomized autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -17,7 +17,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-0.9-sensor-diag";
+const char* FIRMWARE_VERSION = "petbot-0.9-rxd-test";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -29,10 +29,9 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// Sensor diagnostic UART: connect sensor TX to GPIO32 (not board RXD).
-// Unknown module/protocol: log raw bytes at 9600 baud for identification.
-HardwareSerial sensorSerial(2);
-const int SENSOR_RX_PIN = 32;
+// Sensor diagnostic reads the board RXD (GPIO3 / U0_RXD).
+// This shares the USB serial receive line; diagnostics may interfere with Serial input.
+const int SENSOR_RX_PIN = 3;
 
 String mood = "CURIOUS";
 String lastCloudMood = "";
@@ -310,8 +309,8 @@ void handleSerialProvisioning() {
 void setup() {
   Serial.begin(115200);
   Serial.setTimeout(150);
-  sensorSerial.begin(9600, SERIAL_8N1, SENSOR_RX_PIN, -1);
-  Serial.println("Sensor UART diagnostic enabled: RX=GPIO32, 9600 8N1");
+  Serial.println("Sensor diagnostic enabled on board RXD / GPIO3.");
+  Serial.println("Raw bytes will appear on Serial Monitor if the sensor transmits.");
 
   petbotPrefs.begin("petbot", true);
   deviceToken = petbotPrefs.getString("device_token", "");
