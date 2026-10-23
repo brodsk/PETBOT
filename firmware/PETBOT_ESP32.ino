@@ -1,7 +1,7 @@
 /*
   PETBOT firmware v0.7
   Board: LILYGO T3 V1.6.1 / ESP32
-  Features: OLED face, autonomous moods, Wi-Fi setup,
+  Features: expressive OLED face, randomized autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
   Motors, UV sensor and camera remain disabled.
 */
@@ -16,7 +16,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-0.7";
+const char* FIRMWARE_VERSION = "petbot-0.8";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -37,6 +37,8 @@ bool wifiWasConnected = false;
 unsigned long lastPoll = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastBlink = 0;
+unsigned long nextBlinkAt = 0;
+unsigned long nextAutonomousMoodAt = 0;
 bool eyesOpen = true;
 bool displayReady = false;
 
@@ -378,31 +380,52 @@ void setup() {
   drawFace();
 }
 
+String chooseAutonomousMood(const String& current) {
+  // Small personality loop: keep changing expressions, but never repeat
+  // the current one immediately. Cloud-selected moods get a temporary hold.
+  const char* choices[] = {
+    "CURIOUS", "HAPPY", "LOVE", "SURPRISED", "ANNOYED", "SLEEPY"
+  };
+  String next = current;
+  for (int attempt = 0; attempt < 8 && next == current; attempt++) {
+    next = choices[esp_random() % 6];
+  }
+  return next;
+}
+
 void updateAutonomousMood() {
   const unsigned long now = millis();
   const bool connected = WiFi.status() == WL_CONNECTED;
 
-  if (!connected) {
-    if (wifiWasConnected || wifiLostAt == 0) {
-      wifiLostAt = now;
-    }
+  if (nextAutonomousMoodAt == 0) {
+    nextAutonomousMoodAt = now + 7000UL + (esp_random() % 7000UL);
+  }
 
+  if (!connected) {
+    if (wifiWasConnected || wifiLostAt == 0) wifiLostAt = now;
     if (now >= moodOverrideUntil) {
-      mood = (now - wifiLostAt < 12000UL)
-          ? "ANNOYED"
-          : "SLEEPY";
+      String next = (now - wifiLostAt < 12000UL) ? "ANNOYED" : "SLEEPY";
+      if (next != mood) {
+        mood = next;
+        drawFace();
+      }
     }
   } else {
     if (!wifiWasConnected) {
       mood = "SURPRISED";
       moodOverrideUntil = now + 8000UL;
       lastActivity = now;
-    } else if (now >= moodOverrideUntil) {
-      mood = (now - lastActivity > 120000UL)
-          ? "SLEEPY"
-          : "CURIOUS";
+      nextAutonomousMoodAt = moodOverrideUntil + 3000UL;
+      drawFace();
+    } else if (now >= moodOverrideUntil && now >= nextAutonomousMoodAt) {
+      String next = chooseAutonomousMood(mood);
+      mood = next;
+      lastActivity = now;
+      // Expressions last a little different amount of time for a less robotic feel.
+      nextAutonomousMoodAt = now + 9000UL + (esp_random() % 15000UL);
+      drawFace();
+      Serial.println("Autonomous mood: " + mood);
     }
-
     wifiLostAt = 0;
   }
 
@@ -432,8 +455,10 @@ void loop() {
     }
   }
 
-  if (millis() - lastBlink > 4200UL) {
+  if (nextBlinkAt == 0) nextBlinkAt = millis() + 2500UL;
+  if ((long)(millis() - nextBlinkAt) >= 0) {
     lastBlink = millis();
+    nextBlinkAt = millis() + 2500UL + (esp_random() % 4200UL);
 
     eyesOpen = false;
     drawFace();
