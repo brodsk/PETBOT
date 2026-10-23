@@ -11,13 +11,23 @@ module.exports = async function handler(req, res) {
   const mood = typeof body.mood === "string" ? body.mood.toUpperCase() : "";
   const allowedCommands = new Set(["PING", "LOOK_AROUND", "SLEEP", "WAKE"]);
   const command = typeof body.command === "string" ? body.command.toUpperCase() : "";
-  if ((!MOODS.has(mood) && !allowedCommands.has(command)) || (body.command && !allowedCommands.has(command))) {
+  const rawMessage = typeof body.message === "string" ? body.message : "";
+  const notification = rawMessage.trim().replace(/[\\r\\n\\t]/g, " ").replace(/[^\\x20-\\x7E]/g, "").replace(/\\s+/g, " ").slice(0, 80).trim();
+  const isNotification = Boolean(notification);
+  if (isNotification && (body.mood || body.command)) {
+    return res.status(400).json({ ok: false, error: "Отправляй сообщение отдельно от других команд." });
+  }
+  if ((!MOODS.has(mood) && !allowedCommands.has(command) && !isNotification) || (body.command && !allowedCommands.has(command))) {
     return res.status(400).json({ ok: false, error: "Неизвестное настроение или команда." });
+  }
+  if (rawMessage && !isNotification) {
+    return res.status(400).json({ ok: false, error: "Сообщение должно содержать латинские буквы или цифры." });
   }
   try {
     const patch = { updated_at: new Date().toISOString() };
     if (MOODS.has(mood)) patch.desired_mood = mood;
     if (allowedCommands.has(command)) patch.pending_command = { id: Date.now().toString(36), command, created_at: new Date().toISOString() };
+    if (isNotification) patch.pending_command = { id: Date.now().toString(36), command: "MESSAGE", message: notification, created_at: new Date().toISOString() };
     await db("petbot_state?id=eq.1", {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
@@ -31,8 +41,8 @@ module.exports = async function handler(req, res) {
         method: "POST",
         headers: { Prefer: "return=minimal" },
         body: JSON.stringify({
-          event_type: MOODS.has(mood) ? "mood_changed" : "command_queued",
-          payload: MOODS.has(mood) ? { mood } : { command }
+          event_type: MOODS.has(mood) ? "mood_changed" : isNotification ? "notification_queued" : "command_queued",
+          payload: MOODS.has(mood) ? { mood } : isNotification ? { message: notification } : { command }
         })
       });
     } catch (eventError) {
@@ -44,9 +54,9 @@ module.exports = async function handler(req, res) {
     return res.status(200).json({
       ok: true,
       mood: MOODS.has(mood) ? mood : undefined,
-      command: allowedCommands.has(command) ? command : undefined,
+      command: isNotification ? "MESSAGE" : allowedCommands.has(command) ? command : undefined,
       delivered: false,
-      message: "Команда сохранена. Она выполнится, когда плата будет подключена к облаку."
+      message: isNotification ? "Сообщение поставлено в очередь. Оно появится на OLED, когда плата опросит сервер." : "Команда сохранена. Она выполнится, когда плата будет подключена к облаку."
     });
   } catch (error) {
     return jsonError(res, error);
