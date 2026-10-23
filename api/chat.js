@@ -75,7 +75,10 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({
         ok: false,
         code: "AI_UPSTREAM_ERROR",
-        error: "Сервис ИИ вернул ошибку. Проверь ключ и настройки AI Gateway в Vercel."
+        upstreamStatus: upstream.status,
+        upstreamCode: result && result.error && typeof result.error.code === "string" ? result.error.code : undefined,
+        upstreamType: result && result.error && typeof result.error.type === "string" ? result.error.type : undefined,
+        error: "Сервис ИИ вернул ошибку. Диагностический код добавлен ниже."
       });
     }
 
