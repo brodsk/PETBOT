@@ -207,13 +207,13 @@
         </div>
         <div class="media-panel">
           <div class="label">Камера</div>
-          <p>Камера ищет лицо локально. При обнаружении PETBOT меняет настроение на любопытное.</p>
-          <div class="media-actions"><button id="camera-toggle" type="button" aria-pressed="false">Включить камеру</button></div>
+          <p>Камера ищет лицо локально. Когда захочешь, нажми отдельную кнопку — PETBOT отправит один кадр в ИИ, опишет увиденное и продолжит разговор.</p>
+          <div class="media-actions"><button id="camera-toggle" type="button" aria-pressed="false">Включить камеру</button><button id="camera-ask" type="button" disabled>Спросить, что видишь</button></div>
           <video id="camera-preview" class="camera-preview" autoplay playsinline muted></video>
           <p class="media-status" id="camera-status" role="status" aria-live="polite">Камера выключена.</p>
         </div>
       </div>
-      <p class="muted">Микрофон и камера включаются только после нажатия кнопки. Видео обрабатывается в браузере и этой страницей не отправляется на сервер.</p>
+      <p class="muted">Микрофон и камера включаются только после нажатия кнопки. Видео непрерывно не передаётся: на сервер отправляется только один кадр, когда ты нажимаешь «Спросить, что видишь».</p>
     </section>
 
     <section class="card" style="margin-top:14px" aria-labelledby="robot-controls-title">
@@ -488,6 +488,7 @@
     const cameraToggle = document.getElementById('camera-toggle');
     const cameraStatus = document.getElementById('camera-status');
     const cameraPreview = document.getElementById('camera-preview');
+    const cameraAsk = document.getElementById('camera-ask');
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition = null;
     let voiceEnabled = false;
@@ -633,6 +634,38 @@
       }
     }
 
+    cameraAsk.addEventListener('click', async () => {
+      if (!cameraStream || cameraPreview.readyState < 2 || cameraAsk.disabled) {
+        cameraStatus.textContent = 'Сначала включи камеру и дождись изображения.';
+        return;
+      }
+      cameraAsk.disabled = true;
+      cameraStatus.textContent = 'PETBOT рассматривает кадр…';
+      try {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 640 / cameraPreview.videoWidth);
+        canvas.width = Math.max(1, Math.round(cameraPreview.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(cameraPreview.videoHeight * scale));
+        canvas.getContext('2d').drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
+        const image = canvas.toDataURL('image/jpeg', 0.72);
+        const response = await fetch('/api/vision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ image })
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok !== true) throw new Error(data.error || 'Не удалось проанализировать кадр.');
+        cameraStatus.textContent = 'Кадр проанализирован. Передаю описание в разговор…';
+        chatinput.value = 'Посмотри на то, что я сейчас показал тебе через камеру. Вот описание кадра: ' + data.description + '\\nОтветь естественно от себя, как PETBOT. Не утверждай, что знаешь личность человека по изображению.';
+        document.getElementById('chatform').requestSubmit();
+        cameraStatus.textContent = 'PETBOT увидел кадр и отвечает в чате.';
+      } catch (error) {
+        cameraStatus.textContent = error.message || 'Ошибка анализа изображения.';
+      } finally {
+        cameraAsk.disabled = false;
+      }
+    });
+
     cameraToggle.addEventListener('click', async () => {
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
@@ -642,6 +675,7 @@
         cameraToggle.textContent = 'Включить камеру';
         cameraToggle.setAttribute('aria-pressed', 'false');
         cameraStatus.textContent = 'Камера выключена.';
+        cameraAsk.disabled = true;
         if (faceTimer) clearInterval(faceTimer);
         faceTimer = null;
         faceDetector = null;
@@ -661,6 +695,7 @@
         await cameraPreview.play();
         cameraToggle.textContent = 'Выключить камеру';
         cameraToggle.setAttribute('aria-pressed', 'true');
+        cameraAsk.disabled = false;
         cameraStatus.textContent = 'Загружаю распознавание лиц…';
         try {
           if (!window.visionTasksPromise) {
