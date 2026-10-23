@@ -241,6 +241,16 @@
       <ul class="event-list" id="event-list"><li>События робота появятся здесь после подключения.</li></ul>
     </section>
 
+    <section class="card chat" aria-labelledby="notification-title">
+      <h2 id="notification-title">Сообщение на экран робота</h2>
+      <p class="muted">Отправь короткую записку на OLED. PETBOT покажет её примерно на 6 секунд, затем вернётся к глазам. Сейчас поддерживаются латинские буквы, цифры и простые знаки.</p>
+      <form class="chatform" id="notification-form">
+        <textarea id="notification-input" maxlength="80" rows="2" placeholder="Например: HELLO! LOOK AT THE DOOR" aria-label="Сообщение на экран PETBOT" required></textarea>
+        <button id="notification-send" type="submit">На экран</button>
+      </form>
+      <p class="media-status" id="notification-status" role="status" aria-live="polite">Сообщение попадёт в очередь и будет показано при следующем опросе платы.</p>
+    </section>
+
     <section class="card" style="margin-top:14px">
       <div class="label">Быстрые действия</div>
       <p>Реальные команды движения появятся после подключения платы и проверки драйвера моторов.</p>
@@ -382,6 +392,37 @@
     });
     document.querySelectorAll('[data-command]').forEach(button => {
       button.addEventListener('click', () => sendRobotAction({ command: button.dataset.command }));
+    });
+
+    const notificationForm = document.getElementById('notification-form');
+    const notificationInput = document.getElementById('notification-input');
+    const notificationSend = document.getElementById('notification-send');
+    const notificationStatus = document.getElementById('notification-status');
+    notificationForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const messageText = notificationInput.value.trim();
+      if (!messageText) return;
+      notificationSend.disabled = true;
+      notificationStatus.textContent = 'Отправляю сообщение в облако…';
+      try {
+        const response = await fetch('/api/device/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ message: messageText })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || 'Не удалось поставить сообщение в очередь.');
+        notificationStatus.textContent = data.message || 'Сообщение поставлено в очередь.';
+        notificationInput.value = '';
+        eventList.replaceChildren();
+        const item = document.createElement('li');
+        item.textContent = new Date().toLocaleTimeString() + ' · Сообщение на экран: ' + messageText.slice(0, 80);
+        eventList.appendChild(item);
+      } catch (error) {
+        notificationStatus.textContent = error.message || 'Ошибка отправки сообщения.';
+      } finally {
+        notificationSend.disabled = false;
+      }
     });
 
     function addBubble(role, text) {
