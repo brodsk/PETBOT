@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v0.6 — LILYGO T3 V1.6.1 / ESP32
+  PETBOT firmware v0.4 — LILYGO T3 V1.6.1 / ESP32
   Autonomous moods + Wi-Fi captive-portal onboarding. Motors remain disabled.
   Install Adafruit GFX, Adafruit SSD1306 and WiFiManager libraries in Arduino IDE.
 */
@@ -76,7 +76,7 @@ void drawFace() {
     display.fillCircle(rightX + 5, eyeY - 3, 6, SSD1306_WHITE);
     display.fillTriangle(rightX - 11, eyeY, rightX + 11, eyeY, rightX, eyeY + 13, SSD1306_WHITE);
   } else if (mood == "HAPPY") {
-    // Happy: closed, smiling eyes plus a broad smile. Visually distinct from curious.
+    // HAPPY: smiling closed eyes and a visible smile; CURIOUS keeps open eyes.
     display.drawLine(leftX - 11, eyeY + 2, leftX - 5, eyeY - 5, SSD1306_WHITE);
     display.drawLine(leftX - 5, eyeY - 5, leftX + 1, eyeY + 2, SSD1306_WHITE);
     display.drawLine(leftX + 1, eyeY + 2, leftX + 8, eyeY - 5, SSD1306_WHITE);
