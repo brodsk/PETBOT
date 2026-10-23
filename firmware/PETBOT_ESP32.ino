@@ -16,7 +16,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.2-lifelike";
+const char* FIRMWARE_VERSION = "petbot-1.3-smooth-eyes";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -46,7 +46,12 @@ unsigned long lastBlink = 0;
 unsigned long nextBlinkAt = 0;
 unsigned long nextAutonomousMoodAt = 0;
 unsigned long nextMicroActionAt = 0;
+unsigned long microActionUntil = 0;
 String microAction = "";
+float gazeX = 0.0f;
+float gazeY = 0.0f;
+float gazeTargetX = 0.0f;
+float gazeTargetY = 0.0f;
 bool eyesOpen = true;
 bool displayReady = false;
 
@@ -88,11 +93,8 @@ void drawFace() {
   int eyeY = 31;
   int eyeW = 23;
   int eyeH = 25;
-  int glanceX = 0;
-  int glanceY = 0;
-  if (microAction == "LOOK_LEFT") glanceX = -5;
-  else if (microAction == "LOOK_RIGHT") glanceX = 5;
-  else if (microAction == "LOOK_UP") glanceY = -4;
+  int glanceX = (int)roundf(gazeX);
+  int glanceY = (int)roundf(gazeY);
 
   if (!eyesOpen || mood == "SLEEPY") {
     display.drawLine(
@@ -412,26 +414,51 @@ String chooseAutonomousMood(const String& current) {
 
 void updateMicroAction() {
   const unsigned long now = millis();
+
+  // Ease the eyes toward their target instead of jumping between positions.
+  const float easing = 0.22f;
+  float oldX = gazeX;
+  float oldY = gazeY;
+  gazeX += (gazeTargetX - gazeX) * easing;
+  gazeY += (gazeTargetY - gazeY) * easing;
+  if (fabsf(gazeTargetX - gazeX) < 0.18f) gazeX = gazeTargetX;
+  if (fabsf(gazeTargetY - gazeY) < 0.18f) gazeY = gazeTargetY;
+  bool gazeMoved = (fabsf(gazeX - oldX) > 0.15f || fabsf(gazeY - oldY) > 0.15f);
+
   if (now < moodOverrideUntil || mood == "SLEEPY") {
-    if (microAction.length()) { microAction = ""; drawFace(); }
-    nextMicroActionAt = now + 1500UL;
+    gazeTargetX = 0.0f;
+    gazeTargetY = 0.0f;
+    microAction = "";
+    if (gazeMoved) drawFace();
+    nextMicroActionAt = now + 1200UL;
     return;
   }
-  if (microAction.length()) {
-    if (now >= nextMicroActionAt) {
-      microAction = "";
-      nextMicroActionAt = now + 1800UL + (esp_random() % 2800UL);
-      drawFace();
+
+  if (microAction.length() && now >= microActionUntil) {
+    microAction = "";
+    gazeTargetX = 0.0f;
+    gazeTargetY = 0.0f;
+    nextMicroActionAt = now + 1600UL + (esp_random() % 2600UL);
+  }
+
+  if (!microAction.length()) {
+    if (nextMicroActionAt == 0) {
+      nextMicroActionAt = now + 1000UL + (esp_random() % 1600UL);
     }
-    return;
+    if (now >= nextMicroActionAt) {
+      const uint32_t action = esp_random() % 4;
+      microAction = action == 0 ? "LOOK_LEFT" :
+                    action == 1 ? "LOOK_RIGHT" :
+                    action == 2 ? "LOOK_UP" : "LOOK_DIAGONAL";
+      gazeTargetX = action == 0 ? -5.0f :
+                    action == 1 ? 5.0f :
+                    action == 3 ? 3.0f : 0.0f;
+      gazeTargetY = action == 2 ? -4.0f : (action == 3 ? -2.0f : 0.0f);
+      microActionUntil = now + 450UL + (esp_random() % 650UL);
+    }
   }
-  if (nextMicroActionAt == 0) nextMicroActionAt = now + 1200UL + (esp_random() % 1800UL);
-  if (now >= nextMicroActionAt) {
-    const uint32_t action = esp_random() % 3;
-    microAction = action == 0 ? "LOOK_LEFT" : action == 1 ? "LOOK_RIGHT" : "LOOK_UP";
-    nextMicroActionAt = now + 280UL + (esp_random() % 320UL);
-    drawFace();
-  }
+
+  if (gazeMoved) drawFace();
 }
 
 void updateAutonomousMood() {
