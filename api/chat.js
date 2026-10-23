@@ -62,7 +62,7 @@ module.exports = async function handler(req, res) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.PETBOT_MODEL || "openai/gpt-5.4",
+        model: process.env.PETBOT_MODEL || "nvidia/nemotron-3.5-lightning-free",
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...cleanMessages],
         temperature: 0.8,
         max_tokens: 350
