@@ -83,12 +83,13 @@
       <div class="actions">
         <button id="refresh" type="button">Проверить связь</button>
         <button id="events" type="button">Показать статус</button>
+        <button id="clear-chat" type="button">Очистить память чата</button>
       </div>
       <p class="muted" id="message" role="status" aria-live="polite">Робот пока не подключён.</p>
     </section>
 
     <div class="notice">Безопасный режим: эта панель не запускает моторы и не отправляет команды движения. Ключ ИИ хранится только на сервере, не в браузере.</div>
-    <footer>PETBOT · Прототип · Следующий этап — подключить ИИ и затем ESP32.</footer>
+    <footer>PETBOT · Прототип · История чата сохраняется локально в браузере; ESP32 пока не подключена.</footer>
   </main>
   <script>
     const connection = document.getElementById('connection');
@@ -98,7 +99,36 @@
     const chatinput = document.getElementById('chatinput');
     const chatstatus = document.getElementById('chatstatus');
     const send = document.getElementById('send');
-    const history = [];
+    const HISTORY_KEY = 'petbot-chat-history-v1';
+    let history = loadHistory();
+
+    function loadHistory() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+        if (!Array.isArray(saved)) return [];
+        return saved.filter(item =>
+          item && ['user', 'assistant'].includes(item.role) &&
+          typeof item.content === 'string' && item.content.trim()
+        ).slice(-10);
+      } catch (_) {
+        return [];
+      }
+    }
+
+    function saveHistory() {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-10)));
+      } catch (_) {
+        chatstatus.textContent = 'Не удалось сохранить память чата на этом устройстве.';
+      }
+    }
+
+    function restoreHistory() {
+      if (!history.length) return;
+      chatlog.replaceChildren();
+      for (const item of history) addBubble(item.role, item.content);
+      chatstatus.textContent = 'История восстановлена из памяти этого браузера.';
+    }
 
     async function checkApi() {
       connection.textContent = 'Проверяем…';
@@ -132,6 +162,7 @@
       addBubble('user', text);
       history.push({ role: 'user', content: text });
       while (history.length > 10) history.shift();
+      saveHistory();
       chatinput.value = '';
       send.disabled = true;
       chatstatus.textContent = 'PETBOT думает…';
@@ -146,7 +177,8 @@
         addBubble('assistant', data.reply);
         history.push({ role: 'assistant', content: data.reply });
         while (history.length > 10) history.shift();
-        chatstatus.textContent = 'Ответ получен.';
+        saveHistory();
+        chatstatus.textContent = 'Ответ получен. История хранится в этом браузере.';
       } catch (error) {
         history.pop();
         chatstatus.textContent = error.message || 'Ошибка соединения с PETBOT.';
@@ -156,6 +188,15 @@
       }
     });
 
+    document.getElementById('clear-chat').addEventListener('click', () => {
+      history = [];
+      try { localStorage.removeItem(HISTORY_KEY); } catch (_) {}
+      chatlog.replaceChildren();
+      addBubble('assistant', 'Память чата очищена. Начнём заново? 🤖');
+      chatstatus.textContent = 'История удалена из памяти этого браузера.';
+    });
+
+    restoreHistory();
     document.getElementById('refresh').addEventListener('click', checkApi);
     document.getElementById('events').addEventListener('click', () => {
       message.textContent = 'Статус: веб-панель запущена; плата и датчики ещё не подключены.';
