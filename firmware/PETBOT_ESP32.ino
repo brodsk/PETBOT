@@ -108,20 +108,22 @@ void drawFace() {
         rightX, eyeY + 13, SSD1306_WHITE
     );
   } else if (mood == "HAPPY") {
-    // Friendly curved smiling eyes.
-    display.drawLine(leftX - 11, eyeY + 1, leftX - 7, eyeY - 4, SSD1306_WHITE);
-    display.drawLine(leftX - 7, eyeY - 4, leftX - 2, eyeY - 6, SSD1306_WHITE);
-    display.drawLine(leftX - 2, eyeY - 6, leftX + 3, eyeY - 4, SSD1306_WHITE);
-    display.drawLine(leftX + 3, eyeY - 4, leftX + 8, eyeY + 1, SSD1306_WHITE);
-    display.drawLine(rightX - 11, eyeY + 1, rightX - 7, eyeY - 4, SSD1306_WHITE);
-    display.drawLine(rightX - 7, eyeY - 4, rightX - 2, eyeY - 6, SSD1306_WHITE);
-    display.drawLine(rightX - 2, eyeY - 6, rightX + 3, eyeY - 4, SSD1306_WHITE);
-    display.drawLine(rightX + 3, eyeY - 4, rightX + 8, eyeY + 1, SSD1306_WHITE);
-    // Subtle smile.
-    display.drawLine(53, 44, 58, 47, SSD1306_WHITE);
-    display.drawLine(58, 47, 64, 48, SSD1306_WHITE);
-    display.drawLine(64, 48, 70, 47, SSD1306_WHITE);
-    display.drawLine(70, 47, 75, 44, SSD1306_WHITE);
+    // Happy uses the same rounded eye style as the other expressions,
+    // with a tiny upward smile underneath.
+    display.fillRoundRect(
+        leftX - eyeW / 2, eyeY - eyeH / 2,
+        eyeW, eyeH, 8, SSD1306_WHITE
+    );
+    display.fillRoundRect(
+        rightX - eyeW / 2, eyeY - eyeH / 2,
+        eyeW, eyeH, 8, SSD1306_WHITE
+    );
+    display.fillCircle(leftX + 3, eyeY + 1, 4, SSD1306_BLACK);
+    display.fillCircle(rightX + 3, eyeY + 1, 4, SSD1306_BLACK);
+    display.drawLine(54, 47, 59, 49, SSD1306_WHITE);
+    display.drawLine(59, 49, 64, 50, SSD1306_WHITE);
+    display.drawLine(64, 50, 69, 49, SSD1306_WHITE);
+    display.drawLine(69, 49, 74, 47, SSD1306_WHITE);
   } else {
     if (mood == "ANNOYED") {
       display.drawLine(
