@@ -65,7 +65,8 @@ module.exports = async function handler(req, res) {
         model: "nvidia/nemotron-3.5-lightning-free",
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...cleanMessages],
         temperature: 0.8,
-        max_tokens: 350
+        reasoning: { effort: "low" },
+        max_tokens: 1200
       })
     });
 
@@ -82,10 +83,25 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const reply = result && result.choices && result.choices[0] &&
-      result.choices[0].message && result.choices[0].message.content;
-    if (typeof reply !== "string" || !reply.trim()) {
-      return res.status(502).json({ ok: false, error: "ИИ вернул пустой ответ." });
+    const choice = result && Array.isArray(result.choices) && result.choices[0];
+    const message = choice && choice.message;
+    const rawContent = message && message.content;
+    const reply = typeof rawContent === "string"
+      ? rawContent
+      : Array.isArray(rawContent)
+        ? rawContent.map(part => typeof part === "string" ? part : part && typeof part.text === "string" ? part.text : "").join("")
+        : typeof choice?.text === "string" ? choice.text : "";
+    if (!reply.trim()) {
+      console.error("PETBOT AI Gateway empty reply:", JSON.stringify({
+        finish_reason: choice && choice.finish_reason,
+        message_keys: message ? Object.keys(message) : [],
+        usage: result && result.usage
+      }));
+      return res.status(502).json({
+        ok: false,
+        code: "AI_EMPTY_REPLY",
+        error: "Модель не вернула текст. Попробуй ещё раз."
+      });
     }
     return res.status(200).json({ ok: true, reply: reply.trim() });
   } catch (error) {
