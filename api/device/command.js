@@ -12,7 +12,7 @@ module.exports = async function handler(req, res) {
   const allowedCommands = new Set(["PING", "LOOK_AROUND", "SLEEP", "WAKE"]);
   const command = typeof body.command === "string" ? body.command.toUpperCase() : "";
   const rawMessage = typeof body.message === "string" ? body.message : "";
-  const notification = rawMessage.trim().replace(/[\r\n\t]/g, " ").replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").slice(0, 80).trim();
+  const notification = rawMessage.trim().replace(/[\r\n\t]/g, " ").replace(/["\\]/g, "").replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").slice(0, 80).trim();
   const isNotification = Boolean(notification);
   if (isNotification && (body.mood || body.command)) {
     return res.status(400).json({ ok: false, error: "Отправляй сообщение отдельно от других команд." });
