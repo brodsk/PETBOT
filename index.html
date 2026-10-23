@@ -456,23 +456,53 @@
     let faceSeen = false;
     let lastFaceMoodAt = 0;
     let voiceSubmitting = false;
+    let isSpeaking = false;
+    let recognitionRestartTimer = null;
+    let lastVoiceText = '';
+    let lastVoiceTextAt = 0;
+    let lastGreetingAt = 0;
+
+    function startRecognitionSafely() {
+      if (!recognition || !voiceEnabled || isSpeaking) return;
+      if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
+      recognitionRestartTimer = setTimeout(() => {
+        if (!voiceEnabled || isSpeaking) return;
+        try { recognition.start(); } catch (_) {}
+      }, 350);
+    }
 
     function speakReply(text) {
-      if (!('speechSynthesis' in window) || !text) return;
+      if (!('speechSynthesis' in window) || !text || !voiceEnabled) return;
+      if (recognition) {
+        try { recognition.stop(); } catch (_) {}
+      }
+      if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
       window.speechSynthesis.cancel();
+      isSpeaking = true;
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'ru-RU';
       utterance.rate = 1.02;
+      utterance.onend = utterance.onerror = () => {
+        isSpeaking = false;
+        startRecognitionSafely();
+      };
       window.speechSynthesis.speak(utterance);
     }
 
     function submitVoiceText(text) {
       const cleaned = String(text || "").trim();
-      if (!cleaned || voiceSubmitting) return;
+      if (!cleaned || voiceSubmitting || isSpeaking) return;
+      const now = Date.now();
+      if (cleaned.toLowerCase() === lastVoiceText.toLowerCase() && now - lastVoiceTextAt < 5000) return;
+      lastVoiceText = cleaned;
+      lastVoiceTextAt = now;
       voiceSubmitting = true;
+      if (recognition && voiceEnabled) {
+        try { recognition.stop(); } catch (_) {}
+      }
       chatinput.value = cleaned;
       document.getElementById('chatform').requestSubmit();
-      setTimeout(() => { voiceSubmitting = false; }, 1200);
+      setTimeout(() => { voiceSubmitting = false; }, 1800);
     }
 
     if (!SpeechRecognition) {
@@ -501,9 +531,9 @@
         voiceStatus.textContent = event.error === 'not-allowed' ? 'Нет доступа к микрофону. Разреши его в настройках сайта.' : 'Ошибка микрофона: ' + event.error;
       };
       recognition.onend = () => {
-        if (voiceEnabled) {
-          try { recognition.start(); } catch (_) {}
-        } else {
+        if (voiceEnabled && !isSpeaking) {
+          startRecognitionSafely();
+        } else if (!voiceEnabled) {
           voiceToggle.textContent = 'Включить микрофон';
           voiceToggle.setAttribute('aria-pressed', 'false');
         }
@@ -524,6 +554,8 @@
       voiceStop.addEventListener('click', () => {
         voiceEnabled = false;
         if (recognition) recognition.stop();
+        if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
+        isSpeaking = false;
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
         voiceStatus.textContent = 'Микрофон и озвучивание остановлены.';
         voiceToggle.textContent = 'Включить микрофон';
@@ -538,11 +570,17 @@
           ? faceDetector.detectForVideo(cameraPreview, performance.now())
           : await faceDetector.detect(cameraPreview);
         const faces = result.detections || result;
-        if (faces.length && !faceSeen && Date.now() - lastFaceMoodAt > 15000) {
+        if (faces.length && !faceSeen) {
           faceSeen = true;
-          lastFaceMoodAt = Date.now();
           cameraStatus.textContent = 'Лицо обнаружено 👀';
-          sendRobotAction({ mood: 'CURIOUS' });
+          if (Date.now() - lastFaceMoodAt > 15000) {
+            lastFaceMoodAt = Date.now();
+            sendRobotAction({ mood: 'CURIOUS' });
+            if (voiceEnabled && Date.now() - lastGreetingAt > 60000) {
+              lastGreetingAt = Date.now();
+              speakReply('Привет! Я тебя заметил.');
+            }
+          }
         } else if (!faces.length) {
           faceSeen = false;
           cameraStatus.textContent = 'Камера работает. Жду появления лица…';
@@ -629,6 +667,8 @@
       if (recognition) recognition.stop();
       if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
       if (faceTimer) clearInterval(faceTimer);
+      if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
+      isSpeaking = false;
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     });
     restoreHistory();
