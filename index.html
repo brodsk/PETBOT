@@ -181,6 +181,7 @@
         chatstatus.textContent = 'Ответ получен. История хранится в этом браузере.';
       } catch (error) {
         history.pop();
+        saveHistory();
         chatstatus.textContent = error.message || 'Ошибка соединения с PETBOT.';
       } finally {
         send.disabled = false;
