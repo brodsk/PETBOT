@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v0.4 — LILYGO T3 V1.6.1 / ESP32
+  PETBOT firmware v0.6 — LILYGO T3 V1.6.1 / ESP32
   Autonomous moods + Wi-Fi captive-portal onboarding. Motors remain disabled.
   Install Adafruit GFX, Adafruit SSD1306 and WiFiManager libraries in Arduino IDE.
 */
@@ -13,7 +13,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-0.5";
+const char* FIRMWARE_VERSION = "petbot-0.6";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -75,6 +75,18 @@ void drawFace() {
     display.fillCircle(rightX - 5, eyeY - 3, 6, SSD1306_WHITE);
     display.fillCircle(rightX + 5, eyeY - 3, 6, SSD1306_WHITE);
     display.fillTriangle(rightX - 11, eyeY, rightX + 11, eyeY, rightX, eyeY + 13, SSD1306_WHITE);
+  } else if (mood == "HAPPY") {
+    // Happy: closed, smiling eyes plus a broad smile. Visually distinct from curious.
+    display.drawLine(leftX - 11, eyeY + 2, leftX - 5, eyeY - 5, SSD1306_WHITE);
+    display.drawLine(leftX - 5, eyeY - 5, leftX + 1, eyeY + 2, SSD1306_WHITE);
+    display.drawLine(leftX + 1, eyeY + 2, leftX + 8, eyeY - 5, SSD1306_WHITE);
+    display.drawLine(leftX + 8, eyeY - 5, leftX + 12, eyeY + 2, SSD1306_WHITE);
+    display.drawLine(rightX - 12, eyeY + 2, rightX - 8, eyeY - 5, SSD1306_WHITE);
+    display.drawLine(rightX - 8, eyeY - 5, rightX - 1, eyeY + 2, SSD1306_WHITE);
+    display.drawLine(rightX - 1, eyeY + 2, rightX + 5, eyeY - 5, SSD1306_WHITE);
+    display.drawLine(rightX + 5, eyeY - 5, rightX + 11, eyeY + 2, SSD1306_WHITE);
+    display.drawLine(51, 43, 64, 48, SSD1306_WHITE);
+    display.drawLine(64, 48, 77, 43, SSD1306_WHITE);
   } else {
     if (mood == "ANNOYED") {
       display.drawLine(leftX - 12, eyeY - 15, leftX + 8, eyeY - 9, SSD1306_WHITE);
@@ -188,7 +200,7 @@ void setup() {
   wifiManager.setConfigPortalTimeout(0); // Keep setup AP available until Wi-Fi is configured.
   wifiManager.setConnectTimeout(25);
   wifiManager.setTitle("PETBOT Wi-Fi setup");
-  Serial.println("PETBOT firmware v0.4 starting Wi-Fi provisioning");
+  Serial.println("PETBOT starting Wi-Fi provisioning");
   if (displayReady) {
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
