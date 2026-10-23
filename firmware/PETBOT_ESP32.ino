@@ -23,6 +23,11 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 String mood = "CURIOUS";
+String lastCloudMood = "";
+unsigned long moodOverrideUntil = 0;
+unsigned long lastActivity = 0;
+unsigned long wifiLostAt = 0;
+bool wifiWasConnected = false;
 unsigned long lastPoll = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastBlink = 0;
@@ -112,18 +117,26 @@ void pollCloud() {
   String response;
   if (!cloudRequest("/api/device/poll", "GET", "", &response)) return;
   String receivedMood = jsonStringField(response, "mood");
-  if (receivedMood == "HAPPY" || receivedMood == "CURIOUS" || receivedMood == "SLEEPY" ||
-      receivedMood == "SURPRISED" || receivedMood == "ANNOYED" || receivedMood == "LOVE") {
+  // A cloud mood is treated as a short-lived suggestion, not a permanent override.
+  // Only react when the cloud value changes; polling the same value must not freeze autonomy.
+  if (receivedMood.length() && receivedMood != lastCloudMood &&
+      (receivedMood == "HAPPY" || receivedMood == "CURIOUS" || receivedMood == "SLEEPY" ||
+       receivedMood == "SURPRISED" || receivedMood == "ANNOYED" || receivedMood == "LOVE")) {
+    lastCloudMood = receivedMood;
     mood = receivedMood;
-    Serial.println("Cloud mood: " + mood);
+    moodOverrideUntil = millis() + 20000UL;
+    lastActivity = millis();
+    Serial.println("Temporary cloud mood: " + mood);
     drawFace();
   }
   String command = jsonStringField(response, "command");
   if (command.length()) {
     // Commands are acknowledged for diagnostics only. No motors are driven by this firmware.
     Serial.println("Cloud command received (safe demo only): " + command);
+    lastActivity = millis();
+    moodOverrideUntil = millis() + 8000UL;
     if (command == "SLEEP") mood = "SLEEPY";
-    if (command == "WAKE") mood = "CURIOUS";
+    if (command == "WAKE" || command == "PING") mood = "CURIOUS";
     if (command == "LOOK_AROUND") mood = "SURPRISED";
     drawFace();
   }
@@ -137,10 +150,36 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.println("PETBOT firmware v0.2 starting");
+  lastActivity = millis();
+  Serial.println("PETBOT firmware v0.3 autonomous emotion engine starting");
+}
+
+void updateAutonomousMood() {
+  const unsigned long now = millis();
+  const bool connected = WiFi.status() == WL_CONNECTED;
+
+  if (!connected) {
+    if (wifiWasConnected || wifiLostAt == 0) wifiLostAt = now;
+    if (now >= moodOverrideUntil) {
+      mood = (now - wifiLostAt < 12000UL) ? "ANNOYED" : "SLEEPY";
+    }
+  } else {
+    if (!wifiWasConnected) {
+      // Reconnection is a noticeable event, but it fades quickly.
+      mood = "SURPRISED";
+      moodOverrideUntil = now + 8000UL;
+      lastActivity = now;
+    } else if (now >= moodOverrideUntil) {
+      mood = (now - lastActivity > 120000UL) ? "SLEEPY" : "CURIOUS";
+    }
+    wifiLostAt = 0;
+  }
+
+  wifiWasConnected = connected;
 }
 
 void loop() {
+  updateAutonomousMood();
   if (WiFi.status() != WL_CONNECTED) {
     static unsigned long lastWifiRetry = 0;
     if (millis() - lastWifiRetry > 15000) {
