@@ -88,6 +88,11 @@ void drawFace() {
   int eyeY = 31;
   int eyeW = 23;
   int eyeH = 25;
+  int glanceX = 0;
+  int glanceY = 0;
+  if (microAction == "LOOK_LEFT") glanceX = -5;
+  else if (microAction == "LOOK_RIGHT") glanceX = 5;
+  else if (microAction == "LOOK_UP") glanceY = -4;
 
   if (!eyesOpen || mood == "SLEEPY") {
     display.drawLine(
@@ -99,23 +104,23 @@ void drawFace() {
   } else if (mood == "SURPRISED") {
     display.drawCircle(leftX, eyeY, 12, SSD1306_WHITE);
     display.drawCircle(rightX, eyeY, 12, SSD1306_WHITE);
-    display.fillCircle(leftX, eyeY, 4, SSD1306_WHITE);
-    display.fillCircle(rightX, eyeY, 4, SSD1306_WHITE);
+    display.fillCircle(leftX + glanceX, eyeY + glanceY, 4, SSD1306_WHITE);
+    display.fillCircle(rightX + glanceX, eyeY + glanceY, 4, SSD1306_WHITE);
   } else if (mood == "LOVE") {
-    display.fillCircle(leftX - 5, eyeY - 3, 6, SSD1306_WHITE);
-    display.fillCircle(leftX + 5, eyeY - 3, 6, SSD1306_WHITE);
+    display.fillCircle(leftX - 5 + glanceX, eyeY - 3 + glanceY, 6, SSD1306_WHITE);
+    display.fillCircle(leftX + 5 + glanceX, eyeY - 3 + glanceY, 6, SSD1306_WHITE);
     display.fillTriangle(
-        leftX - 11, eyeY, leftX + 11, eyeY,
-        leftX, eyeY + 13, SSD1306_WHITE
+        leftX - 11 + glanceX, eyeY + glanceY, leftX + 11 + glanceX, eyeY + glanceY,
+        leftX + glanceX, eyeY + 13 + glanceY, SSD1306_WHITE
     );
 
-    display.fillCircle(rightX - 5, eyeY - 3, 6, SSD1306_WHITE);
-    display.fillCircle(rightX + 5, eyeY - 3, 6, SSD1306_WHITE);
+    display.fillCircle(rightX - 5 + glanceX, eyeY - 3 + glanceY, 6, SSD1306_WHITE);
+    display.fillCircle(rightX + 5 + glanceX, eyeY - 3 + glanceY, 6, SSD1306_WHITE);
     display.fillTriangle(
-        rightX - 11, eyeY, rightX + 11, eyeY,
-        rightX, eyeY + 13, SSD1306_WHITE
+        rightX - 11 + glanceX, eyeY + glanceY, rightX + 11 + glanceX, eyeY + glanceY,
+        rightX + glanceX, eyeY + 13 + glanceY, SSD1306_WHITE
     );
-  } else if (mood == "HAPPY") {
+  } else if (mood == "HAPPY" && microAction != "LOOK_LEFT" && microAction != "LOOK_RIGHT" && microAction != "LOOK_UP") {
     // Happy: cheerful crescent eyes, visibly different from curious.
     display.drawLine(leftX - 11, eyeY + 4, leftX - 6, eyeY - 3, SSD1306_WHITE);
     display.drawLine(leftX - 6, eyeY - 3, leftX, eyeY - 6, SSD1306_WHITE);
@@ -408,22 +413,23 @@ String chooseAutonomousMood(const String& current) {
 void updateMicroAction() {
   const unsigned long now = millis();
   if (now < moodOverrideUntil || mood == "SLEEPY") {
-    microAction = "";
+    if (microAction.length()) { microAction = ""; drawFace(); }
+    nextMicroActionAt = now + 1500UL;
     return;
   }
-  if (nextMicroActionAt == 0) {
-    nextMicroActionAt = now + 1800UL + (esp_random() % 2200UL);
+  if (microAction.length()) {
+    if (now >= nextMicroActionAt) {
+      microAction = "";
+      nextMicroActionAt = now + 1800UL + (esp_random() % 2800UL);
+      drawFace();
+    }
+    return;
   }
+  if (nextMicroActionAt == 0) nextMicroActionAt = now + 1200UL + (esp_random() % 1800UL);
   if (now >= nextMicroActionAt) {
-    // Brief glance/eye movement, then return to the current expression.
-    const uint32_t action = esp_random() % 4;
-    microAction = action == 0 ? "LOOK_LEFT" :
-                  action == 1 ? "LOOK_RIGHT" :
-                  action == 2 ? "LOOK_UP" : "LOOK_CENTER";
-    nextMicroActionAt = now + 500UL + (esp_random() % 800UL);
-    drawFace();
-  } else if (microAction.length() && now + 400UL >= nextMicroActionAt) {
-    microAction = "";
+    const uint32_t action = esp_random() % 3;
+    microAction = action == 0 ? "LOOK_LEFT" : action == 1 ? "LOOK_RIGHT" : "LOOK_UP";
+    nextMicroActionAt = now + 280UL + (esp_random() % 320UL);
     drawFace();
   }
 }
