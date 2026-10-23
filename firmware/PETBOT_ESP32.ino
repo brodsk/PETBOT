@@ -16,7 +16,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.1-expressions";
+const char* FIRMWARE_VERSION = "petbot-1.2-lifelike");
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -45,6 +45,8 @@ unsigned long lastHeartbeat = 0;
 unsigned long lastBlink = 0;
 unsigned long nextBlinkAt = 0;
 unsigned long nextAutonomousMoodAt = 0;
+unsigned long nextMicroActionAt = 0;
+String microAction = "";
 bool eyesOpen = true;
 bool displayReady = false;
 
@@ -147,7 +149,7 @@ void drawFace() {
     int leftPupilX = leftX + 3;
     int rightPupilX = rightX + 3;
     int pupilY = eyeY + 1;
-    if (mood == "CURIOUS") { pupilY = eyeY - 3; leftPupilX -= 2; rightPupilX -= 2; }
+    if (mood == "CURIOUS") { pupilY = eyeY - 3; leftPupilX -= 2; rightPupilX -= 2; }\n    leftPupilX += glanceX; rightPupilX += glanceX; pupilY += glanceY;
     if (mood == "ANNOYED") { pupilY = eyeY + 5; }
     display.fillCircle(leftPupilX, pupilY, 4, SSD1306_BLACK);
     display.fillCircle(rightPupilX, pupilY, 4, SSD1306_BLACK);
@@ -403,12 +405,35 @@ String chooseAutonomousMood(const String& current) {
   return next;
 }
 
+void updateMicroAction() {
+  const unsigned long now = millis();
+  if (now < moodOverrideUntil || mood == "SLEEPY") {
+    microAction = "";
+    return;
+  }
+  if (nextMicroActionAt == 0) {
+    nextMicroActionAt = now + 1800UL + (esp_random() % 2200UL);
+  }
+  if (now >= nextMicroActionAt) {
+    // Brief glance/eye movement, then return to the current expression.
+    const uint32_t action = esp_random() % 4;
+    microAction = action == 0 ? "LOOK_LEFT" :
+                  action == 1 ? "LOOK_RIGHT" :
+                  action == 2 ? "LOOK_UP" : "LOOK_CENTER";
+    nextMicroActionAt = now + 500UL + (esp_random() % 800UL);
+    drawFace();
+  } else if (microAction.length() && now + 400UL >= nextMicroActionAt) {
+    microAction = "";
+    drawFace();
+  }
+}
+
 void updateAutonomousMood() {
   const unsigned long now = millis();
   const bool connected = WiFi.status() == WL_CONNECTED;
 
   if (nextAutonomousMoodAt == 0) {
-    nextAutonomousMoodAt = now + 3000UL + (esp_random() % 3000UL);
+    nextAutonomousMoodAt = now + 2500UL + (esp_random() % 2500UL);
   }
 
   if (!connected) {
@@ -432,7 +457,7 @@ void updateAutonomousMood() {
       mood = next;
       lastActivity = now;
       // Expressions last a little different amount of time for a less robotic feel.
-      nextAutonomousMoodAt = now + 4000UL + (esp_random() % 5000UL);
+      nextAutonomousMoodAt = now + 3500UL + (esp_random() % 4500UL);
       drawFace();
       Serial.println("Autonomous mood: " + mood);
     }
@@ -458,7 +483,7 @@ void loop() {
   }
 
   // Serial RX is intentionally disabled because GPIO3 is the IR sensor input.
-  updateAutonomousMood();
+  updateAutonomousMood();\n  updateMicroAction();
 
   if (WiFi.status() != WL_CONNECTED) {
     static unsigned long lastWifiRetry = 0;
