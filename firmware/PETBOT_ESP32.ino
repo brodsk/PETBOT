@@ -4,13 +4,16 @@
   Install Adafruit GFX, Adafruit SSD1306 and WiFiManager libraries in Arduino IDE.
 */
 #include <WiFi.h>
+#include <Preferences.h>
 #include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-const char* DEVICE_TOKEN = "PASTE_PETBOT_DEVICE_TOKEN_HERE";
+Preferences petbotPrefs;
+String deviceToken;
+const char* FIRMWARE_VERSION = "petbot-0.5";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -91,12 +94,12 @@ void drawFace() {
 }
 
 bool cloudRequest(const char* path, const String& method, const String& body, String* responseBody) {
-  if (WiFi.status() != WL_CONNECTED || String(DEVICE_TOKEN).startsWith("PASTE_")) return false;
+  if (WiFi.status() != WL_CONNECTED || deviceToken.length() < 32) return false;
   HTTPClient http;
   String url = String(CLOUD_BASE) + path;
   if (!http.begin(url)) return false;
   http.setTimeout(4500);
-  http.addHeader("Authorization", String("Bearer ") + DEVICE_TOKEN);
+  http.addHeader("Authorization", String("Bearer ") + deviceToken);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
   int status = method == "POST" ? http.POST(body) : http.GET();
@@ -107,7 +110,7 @@ bool cloudRequest(const char* path, const String& method, const String& body, St
 }
 
 void sendHeartbeat() {
-  String body = "{\"firmware\":\"petbot-0.3-emotions\",\"wifi_rssi\":" + String(WiFi.RSSI()) +
+  String body = "{\"firmware\":\"" + String(FIRMWARE_VERSION) + "\",\"wifi_rssi\":" + String(WiFi.RSSI()) +
     ",\"free_heap\":" + String(ESP.getFreeHeap()) + ",\"ip\":\"" + WiFi.localIP().toString() +
     "\",\"mood\":\"" + mood + "\",\"autonomy\":true,\"battery_mv\":null," +
     "\"uv_sensor_connected\":false,\"camera_connected\":false,\"motors_enabled\":false}";
@@ -143,8 +146,38 @@ void pollCloud() {
   }
 }
 
+void handleSerialProvisioning() {
+  // Enter TOKEN:<existing-secret> in Serial Monitor once. The token is saved
+  // to ESP32 NVS and is never written into the public source repository.
+  if (!Serial.available()) return;
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  if (line.startsWith("TOKEN:")) {
+    String candidate = line.substring(6);
+    candidate.trim();
+    if (candidate.length() >= 32 && candidate.length() <= 200) {
+      petbotPrefs.begin("petbot", false);
+      petbotPrefs.putString("device_token", candidate);
+      petbotPrefs.end();
+      deviceToken = candidate;
+      Serial.println("PETBOT device token saved in ESP32 NVS.");
+    } else {
+      Serial.println("Token rejected: expected 32-200 characters.");
+    }
+  } else if (line == "STATUS") {
+    Serial.println(String("Token configured: ") + (deviceToken.length() >= 32 ? "YES" : "NO"));
+    Serial.println(String("Wi-Fi connected: ") + (WiFi.status() == WL_CONNECTED ? "YES" : "NO"));
+  }
+}
+
 void setup() {
   Serial.begin(115200);
+  Serial.setTimeout(150);
+  petbotPrefs.begin("petbot", true);
+  deviceToken = petbotPrefs.getString("device_token", "");
+  petbotPrefs.end();
+  Serial.println(String("PETBOT firmware ") + FIRMWARE_VERSION);
+  Serial.println(String("Device token configured: ") + (deviceToken.length() >= 32 ? "YES" : "NO"));
   Wire.begin(OLED_SDA, OLED_SCL);
   displayReady = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
   if (displayReady) drawFace();
@@ -219,6 +252,7 @@ void updateAutonomousMood() {
 }
 
 void loop() {
+  handleSerialProvisioning();
   updateAutonomousMood();
   if (WiFi.status() != WL_CONNECTED) {
     static unsigned long lastWifiRetry = 0;
