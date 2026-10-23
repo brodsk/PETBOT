@@ -14,17 +14,28 @@ async function db(path, options = {}) {
     error.statusCode = 503;
     throw error;
   }
+  const requestHeaders = {
+    apikey: cfg.key,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(options.headers || {})
+  };
+  // Supabase's newer sb_secret_ keys are API keys, not JWTs; do not send them
+  // as Bearer tokens. Legacy service_role JWT keys still need Authorization.
+  if (!cfg.key.startsWith("sb_secret_")) {
+    requestHeaders.Authorization = "Bearer " + cfg.key;
+  }
   const response = await fetch(cfg.url + "/rest/v1/" + path, {
     ...options,
-    headers: {
-      apikey: cfg.key,
-      Authorization: "Bearer " + cfg.key,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(options.headers || {})
-    }
+    headers: requestHeaders
   });
   if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    console.error("PETBOT Supabase request failed", {
+      path,
+      status: response.status,
+      detail: detail.slice(0, 500)
+    });
     const error = new Error("PETBOT cloud storage request failed.");
     error.statusCode = 502;
     throw error;
