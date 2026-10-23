@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v0.9 RXD sensor test
+  PETBOT firmware v1.0 digital IR input
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, randomized autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -13,11 +13,10 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <HardwareSerial.h>
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-0.9-rxd-test";
+const char* FIRMWARE_VERSION = "petbot-1.0-ir-digital";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -29,9 +28,11 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-// Sensor diagnostic reads the board RXD (GPIO3 / U0_RXD).
-// This shares the USB serial receive line; diagnostics may interfere with Serial input.
-const int SENSOR_RX_PIN = 3;
+// Single digital output from the IR module is connected to board RXD (GPIO3).
+// Keep USB Serial TX for logs, but disable its RX so GPIO3 can be read as a digital input.
+const int IR_SENSOR_PIN = 3;
+int lastIrLevel = HIGH;
+unsigned long lastIrLog = 0;
 
 String mood = "CURIOUS";
 String lastCloudMood = "";
@@ -304,15 +305,15 @@ void handleSerialProvisioning() {
         (WiFi.status() == WL_CONNECTED ? "YES" : "NO")
     );
   } else if (line.length()) {
-    Serial.println("RXD SENSOR DATA: " + line);
   }
 }
 
 void setup() {
-  Serial.begin(115200);
-  Serial.setTimeout(150);
-  Serial.println("Sensor diagnostic enabled on board RXD / GPIO3.");
-  Serial.println("Raw bytes will appear on Serial Monitor if the sensor transmits.");
+  Serial.begin(115200, SERIAL_8N1, -1, 1);
+  pinMode(IR_SENSOR_PIN, INPUT);
+  lastIrLevel = digitalRead(IR_SENSOR_PIN);
+  Serial.println("PETBOT digital IR input enabled on RXD/GPIO3.");
+  Serial.println("USB Serial is TX-only; sensor input is read as digital level.");
 
   petbotPrefs.begin("petbot", true);
   deviceToken = petbotPrefs.getString("device_token", "");
@@ -440,7 +441,21 @@ void updateAutonomousMood() {
 }
 
 void loop() {
-  handleSerialProvisioning();
+  int irLevel = digitalRead(IR_SENSOR_PIN);
+  if (irLevel != lastIrLevel) {
+    lastIrLevel = irLevel;
+    Serial.printf("IR DIGITAL GPIO3 = %s\\n", irLevel == HIGH ? "HIGH" : "LOW");
+    lastIrLog = millis();
+
+    // Common digital IR modules assert LOW when detecting a nearby object.
+    if (irLevel == LOW) {
+      mood = "SURPRISED";
+      moodOverrideUntil = millis() + 2500UL;
+      drawFace();
+    }
+  }
+
+  // Serial RX is intentionally disabled because GPIO3 is the IR sensor input.
   updateAutonomousMood();
 
   if (WiFi.status() != WL_CONNECTED) {
