@@ -672,10 +672,12 @@
         });
         const data = await response.json();
         if (!response.ok || data.ok !== true) throw new Error(data.error || 'Не удалось проанализировать кадр.');
-        cameraStatus.textContent = 'Кадр проанализирован. Передаю описание в разговор…';
+        cameraStatus.textContent = 'Кадр проанализирован. Передаю реакцию на плату и описание в разговор…';
+        // A deliberate camera check also sends a cloud mood to the ESP32 OLED.
+        await sendRobotAction({ mood: 'CURIOUS' });
         chatinput.value = 'Пользователь попросил посмотреть кадр с камеры. Описание кадра: ' + data.description + '\\nКратко отреагируй на то, что видно. Не утверждай, что знаешь личность человека.';
         document.getElementById('chatform').requestSubmit();
-        cameraStatus.textContent = 'PETBOT увидел кадр и отвечает в чате.';
+        cameraStatus.textContent = 'Реакция отправлена в облако. Если ESP32 подключена, её экран покажет любопытство.';
       } catch (error) {
         cameraStatus.textContent = error.message || 'Ошибка анализа изображения.';
       } finally {
