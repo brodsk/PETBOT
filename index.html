@@ -438,9 +438,9 @@
 
     function cleanBotText(text) {
       return String(text || '')
-        .replace(/[\\p{Extended_Pictographic}\\uFE0F\\u200D]/gu, '')
-        .replace(/\\s{2,}/g, ' ')
-        .replace(/\\s+([,.!?;:])/g, '$1')
+        .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\uFE0F\u200D]/gu, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+([,.!?;:])/g, '$1')
         .trim();
     }
 
