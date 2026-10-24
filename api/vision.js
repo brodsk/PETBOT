@@ -19,7 +19,7 @@ module.exports = async function handler(req, res) {
         model: "anthropic/claude-sonnet-4.5",
         messages: [{ role: "user", content: [
           { type: "text", text: "Ты анализируешь один кадр с камеры PETBOT по явному запросу пользователя. Кратко на русском опиши только то, что действительно видно: людей, предметы, обстановку и заметные действия. Не угадывай личность, имя, характер, эмоции, возраст или другие личные данные человека. Если что-то неразборчиво, прямо скажи. Ответ 1–4 предложения." },
-          { type: "image_url", image_url: { url: image, detail: "low" } }
+          { type: "image_url", image_url: { url: image, detail: "high" } }
         ] }],
         temperature: 0.2,
         max_tokens: 250
@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
     const result = await upstream.json().catch(() => ({}));
     if (!upstream.ok) {
       console.error("PETBOT vision gateway error:", upstream.status, result && result.error ? result.error.message : "upstream error");
-      return res.status(502).json({ ok: false, code: "VISION_UPSTREAM_ERROR", upstreamStatus: upstream.status, error: "ИИ не смог обработать изображение. Попробуй ещё раз." });
+      return res.status(502).json({ ok: false, code: "VISION_UPSTREAM_ERROR", upstreamStatus: upstream.status, error: "ИИ не смог обработать изображение (HTTP " + upstream.status + "). Проверь ключ AI Gateway и доступность vision-модели в Vercel." });
     }
     const content = result && result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content;
     const description = typeof content === "string" ? content.trim() : Array.isArray(content) ? content.map(part => part && typeof part.text === "string" ? part.text : "").join("").trim() : "";
