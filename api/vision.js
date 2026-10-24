@@ -16,7 +16,7 @@ module.exports = async function handler(req, res) {
       method: "POST",
       headers: { "Authorization": "Bearer " + apiKey, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "anthropic/claude-sonnet-4.5",
+        model: "google/gemini-2.5-flash-lite",
         messages: [{ role: "user", content: [
           { type: "text", text: "Ты анализируешь один кадр с камеры PETBOT по явному запросу пользователя. Кратко на русском опиши только то, что действительно видно: людей, предметы, обстановку и заметные действия. Не угадывай личность, имя, характер, эмоции, возраст или другие личные данные человека. Если что-то неразборчиво, прямо скажи. Ответ 1–4 предложения." },
           { type: "image_url", image_url: { url: image, detail: "high" } }
