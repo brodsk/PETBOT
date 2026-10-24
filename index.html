@@ -184,9 +184,9 @@
 
     <section class="card chat" aria-labelledby="chat-title">
       <h2 id="chat-title">Разговор с PETBOT</h2>
-      <p class="muted">Напиши или скажи что-нибудь. PETBOT ответит, а его настроение синхронизируется с роботом, когда плата в сети.</p>
+      <p class="muted">Я отвечаю на твои сообщения. Сам без повода не говорю; эмодзи показываю выражением мордочки.</p>
       <div class="chatlog" id="chatlog" role="log" aria-live="polite">
-        <div class="bubble bot">Привет! Я PETBOT 🤖 Пока я живу в облаке, но уже готов с тобой поговорить.</div>
+        <div class="bubble bot">Привет! Я PETBOT. Скажи, если что-то понадобится.</div>
       </div>
       <form class="chatform" id="chatform">
         <textarea id="chatinput" maxlength="2000" rows="2" placeholder="Напиши PETBOT…" aria-label="Сообщение для PETBOT" required></textarea>
@@ -425,10 +425,29 @@
       }
     });
 
+    function moodFromEmoji(text) {
+      const value = String(text || '');
+      if (/[❤️💚😍🥰😘💕💖]/u.test(value)) return 'LOVE';
+      if (/[😂🤣😊😄😁😆🙂😃]/u.test(value)) return 'HAPPY';
+      if (/[😴🥱💤]/u.test(value)) return 'SLEEPY';
+      if (/[😮😲😳🤯😱]/u.test(value)) return 'SURPRISED';
+      if (/[😠😡🤬🙄]/u.test(value)) return 'ANNOYED';
+      if (/[👀🤔🧐🤖]/u.test(value)) return 'CURIOUS';
+      return null;
+    }
+
+    function cleanBotText(text) {
+      return String(text || '')
+        .replace(/[\\p{Extended_Pictographic}\\uFE0F\\u200D]/gu, '')
+        .replace(/\\s{2,}/g, ' ')
+        .replace(/\\s+([,.!?;:])/g, '$1')
+        .trim();
+    }
+
     function addBubble(role, text) {
       const bubble = document.createElement('div');
       bubble.className = 'bubble ' + (role === 'user' ? 'user' : 'bot');
-      bubble.textContent = text;
+      bubble.textContent = role === 'assistant' ? cleanBotText(text) : text;
       chatlog.appendChild(bubble);
       chatlog.scrollTop = chatlog.scrollHeight;
     }
@@ -458,7 +477,8 @@
           throw new Error((data.error || 'Не удалось получить ответ.') + diagnostics);
         }
         addBubble('assistant', data.reply);
-        if (data.mood) updateMoodDisplay(data.mood);
+        const replyMood = moodFromEmoji(data.reply) || data.mood;
+        if (replyMood) updateMoodDisplay(replyMood);
         history.push({ role: 'assistant', content: data.reply });
         while (history.length > 10) history.shift();
         saveHistory();
@@ -618,10 +638,7 @@
           if (Date.now() - lastFaceMoodAt > 15000) {
             lastFaceMoodAt = Date.now();
             sendRobotAction({ mood: 'CURIOUS' });
-            if (voiceEnabled && Date.now() - lastGreetingAt > 60000) {
-              lastGreetingAt = Date.now();
-              speakReply('Привет! Я тебя заметил.');
-            }
+            /* No unsolicited greetings: face detection only changes the expression. */
           }
         } else if (!faces.length) {
           faceSeen = false;
@@ -647,7 +664,7 @@
         canvas.width = Math.max(1, Math.round(cameraPreview.videoWidth * scale));
         canvas.height = Math.max(1, Math.round(cameraPreview.videoHeight * scale));
         canvas.getContext('2d').drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
-        const image = canvas.toDataURL('image/jpeg', 0.72);
+        const image = canvas.toDataURL('image/jpeg', 0.82);
         const response = await fetch('/api/vision', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -656,7 +673,7 @@
         const data = await response.json();
         if (!response.ok || data.ok !== true) throw new Error(data.error || 'Не удалось проанализировать кадр.');
         cameraStatus.textContent = 'Кадр проанализирован. Передаю описание в разговор…';
-        chatinput.value = 'Посмотри на то, что я сейчас показал тебе через камеру. Вот описание кадра: ' + data.description + '\\nОтветь естественно от себя, как PETBOT. Не утверждай, что знаешь личность человека по изображению.';
+        chatinput.value = 'Пользователь попросил посмотреть кадр с камеры. Описание кадра: ' + data.description + '\\nКратко отреагируй на то, что видно. Не утверждай, что знаешь личность человека.';
         document.getElementById('chatform').requestSubmit();
         cameraStatus.textContent = 'PETBOT увидел кадр и отвечает в чате.';
       } catch (error) {
