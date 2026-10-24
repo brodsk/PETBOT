@@ -79,7 +79,7 @@ module.exports = async function handler(req, res) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "nvidia/nemotron-3.5-lightning-free",
+        model: "google/gemini-2.5-flash-lite",
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...cleanMessages],
         temperature: 0.8,
         reasoning: { effort: "low" },
