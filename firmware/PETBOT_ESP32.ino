@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v1.4
+  PETBOT firmware v1.7
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -17,7 +17,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.6";
+const char* FIRMWARE_VERSION = "petbot-1.7";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
