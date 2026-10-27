@@ -197,7 +197,7 @@
 
     <section class="card chat" aria-labelledby="senses-title">
       <h2 id="senses-title">Голос и зрение</h2>
-      <p class="muted">Включай микрофон и камеру по необходимости. Распознавание лица выполняется на телефоне; видео не отправляется в облако.</p>
+      <p class="muted">После разрешения браузера камера и микрофон работают непрерывно, пока ты их не выключишь. Кадры периодически анализируются облачным ИИ; микрофон распознаёт речь и отправляет её в чат.</p>
       <div class="media-grid">
         <div class="media-panel">
           <div class="label">Микрофон и голос</div>
@@ -207,13 +207,13 @@
         </div>
         <div class="media-panel">
           <div class="label">Камера</div>
-          <p>Камера ищет лицо локально. Когда захочешь, нажми отдельную кнопку — PETBOT отправит один кадр в ИИ, опишет увиденное и продолжит разговор.</p>
-          <div class="media-actions"><button id="camera-toggle" type="button" aria-pressed="false">Включить камеру</button><button id="camera-ask" type="button" disabled>Спросить, что видишь</button></div>
+          <p>После включения камера автоматически анализирует сцену и реагирует на заметные изменения. Отдельно нажимать кнопку для каждого кадра не нужно.</p>
+          <div class="media-actions"><button id="camera-toggle" type="button" aria-pressed="false">Включить камеру</button><button id="camera-ask" type="button" style="display:none" disabled>Спросить, что видишь</button></div>
           <video id="camera-preview" class="camera-preview" autoplay playsinline muted></video>
           <p class="media-status" id="camera-status" role="status" aria-live="polite">Камера выключена.</p>
         </div>
       </div>
-      <p class="muted">Микрофон и камера включаются только после нажатия кнопки. Видео непрерывно не передаётся: на сервер отправляется только один кадр, когда ты нажимаешь «Спросить, что видишь».</p>
+      <p class="muted">Камера и микрофон требуют явного разрешения браузера и включаются кнопками. После включения анализ работает автоматически; видео не сохраняется, отдельные кадры отправляются ИИ для анализа.</p>
     </section>
 
     <section class="card" style="margin-top:14px" aria-labelledby="robot-controls-title">
@@ -514,6 +514,9 @@
     let voiceEnabled = false;
     let cameraStream = null;
     let faceTimer = null;
+    let visionTimer = null;
+    let lastVisionDescription = '';
+    let visionBusy = false;
     let faceDetector = null;
     let faceSeen = false;
     let lastFaceMoodAt = 0;
@@ -651,6 +654,50 @@
       }
     }
 
+
+    async function analyzeCameraFrame() {
+      if (!cameraStream || cameraPreview.readyState < 2 || visionBusy) return;
+      visionBusy = true;
+      try {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 640 / cameraPreview.videoWidth);
+        canvas.width = Math.max(1, Math.round(cameraPreview.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(cameraPreview.videoHeight * scale));
+        canvas.getContext('2d').drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
+        const response = await fetch('/api/vision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ image: canvas.toDataURL('image/jpeg', 0.72) })
+        });
+        const data = await response.json();
+        if (!response.ok || data.ok !== true) throw new Error(data.error || 'Не удалось проанализировать кадр.');
+        const description = String(data.description || '').trim();
+        cameraStatus.textContent = 'Камера анализирует сцену автоматически. ' + description.slice(0, 180);
+        // Avoid repeating the same scene into the chat; react only to meaningful changes.
+        if (description && description !== lastVisionDescription) {
+          const changed = lastVisionDescription.length === 0 || descriptionSimilarity(description, lastVisionDescription) < 0.72;
+          lastVisionDescription = description;
+          if (changed) {
+            chatinput.value = 'Наблюдение с камеры (текущая сцена): ' + description + '\nКоротко и естественно отреагируй на то, что действительно видно. Не угадывай личность и не делай выводов о чувствах человека.';
+            document.getElementById('chatform').requestSubmit();
+          }
+        }
+      } catch (error) {
+        cameraStatus.textContent = 'Автоанализ камеры: ' + (error.message || 'ошибка анализа');
+      } finally {
+        visionBusy = false;
+      }
+    }
+
+    function descriptionSimilarity(a, b) {
+      const words = value => new Set(String(value).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').split(/\s+/).filter(word => word.length > 3));
+      const left = words(a), right = words(b);
+      if (!left.size || !right.size) return 0;
+      let overlap = 0;
+      for (const word of left) if (right.has(word)) overlap++;
+      return overlap / (left.size + right.size - overlap);
+    }
+
     cameraAsk.addEventListener('click', async () => {
       if (!cameraStream || cameraPreview.readyState < 2 || cameraAsk.disabled) {
         cameraStatus.textContent = 'Сначала включи камеру и дождись изображения.';
@@ -696,7 +743,9 @@
         cameraStatus.textContent = 'Камера выключена.';
         cameraAsk.disabled = true;
         if (faceTimer) clearInterval(faceTimer);
+        if (visionTimer) clearInterval(visionTimer);
         faceTimer = null;
+        visionTimer = null;
         faceDetector = null;
         faceSeen = false;
         return;
@@ -734,8 +783,10 @@
               });
           }
           faceDetector = await window.visionTasksPromise;
-          cameraStatus.textContent = 'Камера включена. Ищу лицо…';
+          cameraStatus.textContent = 'Камера включена. Ищу лицо и анализирую сцену…';
           faceTimer = setInterval(scanForFace, 700);
+          visionTimer = setInterval(analyzeCameraFrame, 8000);
+          setTimeout(analyzeCameraFrame, 1500);
         } catch (error) {
           faceDetector = null;
           cameraStatus.textContent = 'Видео работает, но не загрузилась модель распознавания. Проверь интернет и выключи/включи камеру.';
@@ -762,6 +813,7 @@
       if (recognition) recognition.stop();
       if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
       if (faceTimer) clearInterval(faceTimer);
+      if (visionTimer) clearInterval(visionTimer);
       if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
       isSpeaking = false;
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
