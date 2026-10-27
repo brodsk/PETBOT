@@ -467,7 +467,7 @@
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ messages: history })
+          body: JSON.stringify({ messages: history, vision_context: latestVisionContext })
         });
         const data = await response.json();
         if (!response.ok || data.ok !== true) {
@@ -516,6 +516,8 @@
     let faceTimer = null;
     let visionTimer = null;
     let lastVisionDescription = '';
+    let latestVisionContext = '';
+    let lastVisionScanAt = 0;
     let visionBusy = false;
     let faceDetector = null;
     let faceSeen = false;
@@ -657,6 +659,9 @@
 
     async function analyzeCameraFrame() {
       if (!cameraStream || cameraPreview.readyState < 2 || visionBusy) return;
+      // Keep vision calls low-frequency to avoid gateway rate limits.
+      if (Date.now() - lastVisionScanAt < 25000) return;
+      lastVisionScanAt = Date.now();
       visionBusy = true;
       try {
         const canvas = document.createElement('canvas');
@@ -672,7 +677,8 @@
         const data = await response.json();
         if (!response.ok || data.ok !== true) throw new Error(data.error || 'Не удалось проанализировать кадр.');
         const description = String(data.description || '').trim();
-        cameraStatus.textContent = 'Камера анализирует сцену автоматически. ' + description.slice(0, 180);
+        cameraStatus.textContent = 'Камера наблюдает за сценой. PETBOT не будет комментировать каждый кадр.';
+        latestVisionContext = description;
         // Avoid repeating the same scene into the chat; react only to meaningful changes.
         if (description && description !== lastVisionDescription) {
           const changed = lastVisionDescription.length === 0 || descriptionSimilarity(description, lastVisionDescription) < 0.72;
@@ -785,8 +791,8 @@
           faceDetector = await window.visionTasksPromise;
           cameraStatus.textContent = 'Камера включена. Ищу лицо и анализирую сцену…';
           faceTimer = setInterval(scanForFace, 700);
-          visionTimer = setInterval(analyzeCameraFrame, 8000);
-          setTimeout(analyzeCameraFrame, 1500);
+          visionTimer = setInterval(analyzeCameraFrame, 30000);
+          setTimeout(analyzeCameraFrame, 5000);
         } catch (error) {
           faceDetector = null;
           cameraStatus.textContent = 'Видео работает, но не загрузилась модель распознавания. Проверь интернет и выключи/включи камеру.';
