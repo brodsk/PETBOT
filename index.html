@@ -493,7 +493,7 @@
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ messages: history, vision_context: latestVisionContext, vision_image: visionImage || undefined })
+          body: JSON.stringify({ messages: history, vision_context: visionImage && cameraStream ? latestVisionContext : '', vision_image: visionImage || undefined })
         });
         const data = await response.json();
         if (!response.ok || data.ok !== true) {
@@ -833,11 +833,13 @@
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
         cameraStream = null;
+        latestVisionContext = '';
+        lastVisionDescription = '';
         cameraPreview.srcObject = null;
         cameraPreview.style.display = 'none';
-        cameraToggle.textContent = 'Включить камеру';
+        cameraToggle.textContent = '▣ Видео';
         cameraToggle.setAttribute('aria-pressed', 'false');
-        cameraStatus.textContent = 'Камера выключена.';
+        cameraStatus.textContent = 'Камера выключена. PETBOT не получает изображение.';
         cameraAsk.disabled = true;
         if (faceTimer) clearInterval(faceTimer);
         if (visionTimer) clearInterval(visionTimer);
@@ -858,7 +860,7 @@
         cameraPreview.srcObject = cameraStream;
         cameraPreview.style.display = 'block';
         await cameraPreview.play();
-        cameraToggle.textContent = 'Выключить камеру';
+        cameraToggle.textContent = '▣ Видео включено';
         cameraToggle.setAttribute('aria-pressed', 'true');
         cameraAsk.disabled = false;
         cameraStatus.textContent = 'Загружаю распознавание лиц…';
@@ -880,7 +882,7 @@
               });
           }
           faceDetector = await window.visionTasksPromise;
-          cameraStatus.textContent = 'Камера включена. Ищу лицо и анализирую сцену…';
+          cameraStatus.textContent = 'Видео включено. Теперь можно отправлять PETBOT текущий кадр.';
           faceTimer = setInterval(scanForFace, 700);
           visionTimer = setInterval(analyzeCameraFrame, 45000);
           setTimeout(analyzeCameraFrame, 8000);
