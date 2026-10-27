@@ -240,6 +240,7 @@
         <button class="mood-button" data-mood="SURPRISED" aria-pressed="false"><span class="mood-emoji">😮</span><span>Удивление</span></button>
         <button class="mood-button" data-mood="ANNOYED" aria-pressed="false"><span class="mood-emoji">😠</span><span>Недовольство</span></button>
         <button class="mood-button" data-mood="LOVE" aria-pressed="false"><span class="mood-emoji">💚</span><span>Симпатия</span></button>
+        <button class="mood-button" data-mood="SAD" aria-pressed="false"><span class="mood-emoji">😢</span><span>Грусть</span></button>
       </div>
       <div class="actions">
         <button type="button" data-command="PING">Проверить робота</button>
@@ -296,8 +297,8 @@
     const hardwareValue = document.getElementById('hardware-value');
     const hardwareDetail = document.getElementById('hardware-detail');
     const eventList = document.getElementById('event-list');
-    const moodLabels = { HAPPY: 'Радость', CURIOUS: 'Любопытство', SLEEPY: 'Сонный', SURPRISED: 'Удивление', ANNOYED: 'Недовольство', LOVE: 'Симпатия' };
-    const moodFaces = { HAPPY: '😊', CURIOUS: '👀', SLEEPY: '😴', SURPRISED: '😮', ANNOYED: '😠', LOVE: '💚' };
+    const moodLabels = { HAPPY: 'Радость', CURIOUS: 'Любопытство', SLEEPY: 'Сонный', SURPRISED: 'Удивление', ANNOYED: 'Недовольство', LOVE: 'Симпатия', SAD: 'Грусть' };
+    const moodFaces = { HAPPY: '😊', CURIOUS: '👀', SLEEPY: '😴', SURPRISED: '😮', ANNOYED: '😠', LOVE: '💚', SAD: '😢' };
     const HISTORY_KEY = 'petbot-chat-history-v1';
     const VISION_COOLDOWN_KEY = 'petbot-vision-cooldown-v1';
     let history = loadHistory();
@@ -539,6 +540,8 @@
       const voicePanel = mediaGrid.querySelector('#voice-toggle')?.closest('.media-panel');
       const cameraPanel = mediaGrid.querySelector('#camera-toggle')?.closest('.media-panel');
       if (cameraPanel) {
+        const askButton = cameraPanel.querySelector('#camera-ask');
+        if (askButton) { askButton.style.display = 'none'; controls.appendChild(askButton); }
         const preview = cameraPanel.querySelector('#camera-preview');
         if (preview) chatCard.insertBefore(preview, chatCard.querySelector('#chatlog'));
         const cameraStatusNode = cameraPanel.querySelector('#camera-status');
@@ -656,8 +659,14 @@
     }
 
     if (!SpeechRecognition) {
-      voiceToggle.disabled = true;
-      voiceStatus.textContent = 'Распознавание речи не поддерживается. Попробуй Chrome на Android.';
+      voiceStatus.textContent = 'Голосовой ввод не поддерживается этим браузером. Озвучивание ответов всё ещё доступно.';
+      voiceToggle.addEventListener('click', () => {
+        voiceEnabled = !voiceEnabled;
+        voiceToggle.textContent = voiceEnabled ? '🔊 Голос включён' : '🎙 Микрофон';
+        voiceToggle.setAttribute('aria-pressed', String(voiceEnabled));
+        voiceStatus.textContent = voiceEnabled ? 'Озвучивание ответов включено. Голосовой ввод в этом браузере недоступен.' : 'Озвучивание ответов выключено.';
+        if (!voiceEnabled && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+      });
     } else {
       recognition = new SpeechRecognition();
       recognition.lang = 'ru-RU';
@@ -691,12 +700,14 @@
       voiceToggle.addEventListener('click', () => {
         if (!recognition) return;
         voiceEnabled = !voiceEnabled;
+        if (voiceEnabled && !('speechSynthesis' in window)) voiceStatus.textContent = 'Ввод речи доступен, но браузер не поддерживает озвучивание.';
         if (voiceEnabled) {
           try { recognition.start(); }
           catch (_) { voiceStatus.textContent = 'Не удалось запустить микрофон. Нажми ещё раз.'; voiceEnabled = false; }
         } else {
           recognition.stop();
-          voiceStatus.textContent = 'Микрофон выключен.';
+          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+          voiceStatus.textContent = 'Микрофон и озвучивание выключены.';
           voiceToggle.textContent = 'Включить микрофон';
           voiceToggle.setAttribute('aria-pressed', 'false');
         }
