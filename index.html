@@ -154,6 +154,20 @@
       .chatform button { width:100%; }
     }
 
+
+    /* Unified call-style conversation: live preview, controls and chat in one surface. */
+    .call-shell { margin-top:12px; }
+    .call-shell .call-toolbar { display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:12px 0 4px; }
+    .call-shell .call-toolbar button { min-width:52px;min-height:48px;border-radius:999px; }
+    .call-shell .call-toolbar button[aria-pressed="true"] { border-color:var(--accent);background:rgba(183,242,139,.13); }
+    .call-shell .media-grid { display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px; }
+    .call-shell .media-panel { padding:10px 12px;border-radius:14px; }
+    .call-shell .media-panel p { margin:4px 0;font-size:12px; }
+    .call-shell #camera-preview { display:none;width:100%;max-height:460px;aspect-ratio:4/3;object-fit:cover;margin:0 0 10px; }
+    .call-shell #voice-stop { display:none; }
+    .call-shell .media-panel .label { display:none; }
+    .call-shell .call-toggle-label { display:inline; }
+    @media(max-width:700px){.call-shell #camera-preview{max-height:52vh}.call-shell .call-toolbar{gap:8px}.call-shell .call-toolbar button{flex:1;min-width:0}}
   </style>
 </head>
 <body>
@@ -465,17 +479,16 @@
       send.disabled = true;
       chatstatus.textContent = 'PETBOT думает…';
       try {
-        // Attach a fresh frame to visual questions; descriptive background alone cannot count fingers reliably.
+        // In call mode, every message receives the current frame, not a stale background caption.
         let visionImage = '';
-        const visualQuestion = /(сколько.*пальц|пальц.*показыва|что я показываю|что видишь|что на (?:этом )?(?:изображении|картинке|фото)|опиши (?:кадр|изображение|что перед тобой)|how many fingers|what am i showing|what do you see|what is in (?:the )?(?:image|picture|photo))/i.test(text);
-        if (visualQuestion && cameraStream && cameraPreview.readyState >= 2 && cameraPreview.videoWidth > 0) {
+        if (cameraStream && cameraPreview.readyState >= 2 && cameraPreview.videoWidth > 0) {
           const frame = document.createElement('canvas');
           const scale = Math.min(1, 768 / cameraPreview.videoWidth);
           frame.width = Math.max(1, Math.round(cameraPreview.videoWidth * scale));
           frame.height = Math.max(1, Math.round(cameraPreview.videoHeight * scale));
           frame.getContext('2d', { alpha: false }).drawImage(cameraPreview, 0, 0, frame.width, frame.height);
           visionImage = frame.toDataURL('image/jpeg', 0.78);
-          cameraStatus.textContent = 'Передаю свежий кадр PETBOT для ответа…';
+          cameraStatus.textContent = 'Свежий кадр передан вместе с сообщением.';
         }
         const response = await fetch('/api/chat', {
           method: 'POST',
@@ -513,6 +526,55 @@
       addBubble('assistant', 'Память чата очищена. Начнём заново? 🤖');
       chatstatus.textContent = 'История удалена из памяти этого браузера.';
     });
+
+    // Recompose the existing controls into one messenger/call-style panel without changing their handlers.
+    (function buildCallLayout() {
+      const chatCard = document.querySelector('section[aria-labelledby="chat-title"]');
+      const senses = document.querySelector('section[aria-labelledby="senses-title"]');
+      const mediaGrid = senses && senses.querySelector('.media-grid');
+      if (!chatCard || !senses || !mediaGrid) return;
+      chatCard.classList.add('call-shell');
+      const toolbar = document.createElement('div');
+      toolbar.className = 'call-toolbar';
+      const voicePanel = mediaGrid.querySelector('#voice-toggle')?.closest('.media-panel');
+      const cameraPanel = mediaGrid.querySelector('#camera-toggle')?.closest('.media-panel');
+      if (cameraPanel) {
+        const preview = cameraPanel.querySelector('#camera-preview');
+        if (preview) chatCard.insertBefore(preview, chatCard.querySelector('#chatlog'));
+      }
+      const controls = document.createElement('div');
+      controls.className = 'call-toolbar';
+      if (voicePanel) {
+        const voiceToggle = voicePanel.querySelector('#voice-toggle');
+        const voiceStop = voicePanel.querySelector('#voice-stop');
+        if (voiceToggle) { voiceToggle.textContent = '🎙 Микрофон'; controls.appendChild(voiceToggle); }
+        if (voiceStop) { voiceStop.textContent = '■ Стоп'; controls.appendChild(voiceStop); }
+      }
+      if (cameraPanel) {
+        const cameraToggle = cameraPanel.querySelector('#camera-toggle');
+        if (cameraToggle) { cameraToggle.textContent = '▣ Видео'; controls.appendChild(cameraToggle); }
+      }
+      const callChatToggle = document.createElement('button');
+      callChatToggle.type = 'button';
+      callChatToggle.id = 'call-chat-toggle';
+      callChatToggle.textContent = '☰ Чат';
+      callChatToggle.setAttribute('aria-expanded', 'true');
+      controls.appendChild(callChatToggle);
+      const log = chatCard.querySelector('#chatlog');
+      const form = chatCard.querySelector('#chatform');
+      const status = chatCard.querySelector('#chatstatus');
+      if (log && form && status) {
+        chatCard.insertBefore(controls, log);
+        callChatToggle.addEventListener('click', () => {
+          const show = callChatToggle.getAttribute('aria-expanded') !== 'true';
+          callChatToggle.setAttribute('aria-expanded', String(show));
+          log.style.display = form.style.display = status.style.display = show ? '' : 'none';
+        });
+      }
+      if (voicePanel) voicePanel.remove();
+      if (cameraPanel) cameraPanel.remove();
+      senses.remove();
+    })();
 
     // Phone microphone: browser speech recognition sends speech into the existing chat.
     const voiceToggle = document.getElementById('voice-toggle');
