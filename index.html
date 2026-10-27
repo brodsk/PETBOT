@@ -690,15 +690,11 @@
         }
         const description = String(data.description || '').trim().slice(0, 700);
         if (!description) return;
-        const changed = !lastVisionDescription ||
-          descriptionSimilarity(description, lastVisionDescription) < 0.58;
-        if (changed) {
-          lastVisionDescription = description;
-          latestVisionContext = description;
-          cameraStatus.textContent = 'Заметил изменение сцены. Запомнил контекст и жду, когда ты обратишься.';
-        } else {
-          cameraStatus.textContent = 'Камера спокойно наблюдает. Ничего заметно нового — не отвлекаю.';
-        }
+        latestVisionContext = description;
+        if (description && description !== lastVisionDescription) lastVisionDescription = description;
+        cameraStatus.textContent = data.important_change === true
+          ? 'Важное изменение: ' + String(data.event || description).slice(0, 150) + '. Сохранено в памяти.'
+          : 'Камера наблюдает тихо. Существенных изменений нет — не отвлекаю.';
         lastVisionErrorAt = 0;
       } catch (error) {
         if (Date.now() - lastVisionErrorAt > 20000) {
