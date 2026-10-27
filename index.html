@@ -189,7 +189,7 @@
     .call-shell #camera-status, .call-shell #voice-status {
       margin:0; padding:8px 16px; background:#0b101b; font-size:12px;
     }
-    .call-shell #voice-status { display:none; }
+    .call-shell #voice-status { display:block; }
     .call-shell #camera-ask { display:none !important; }
     .call-shell .media-panel .label { display:none; }
     .call-shell .call-toggle-label { display:inline; }
@@ -554,82 +554,97 @@
       chatstatus.textContent = 'История удалена из памяти этого браузера.';
     });
 
-    // Recompose the existing controls into one messenger/call-style panel without changing their handlers.
+    // Build the call UI only after creating the toolbar; all existing controls keep their original listeners.
     (function buildCallLayout() {
       const chatCard = document.querySelector('section[aria-labelledby="chat-title"]');
       const senses = document.querySelector('section[aria-labelledby="senses-title"]');
       const mediaGrid = senses && senses.querySelector('.media-grid');
       if (!chatCard || !senses || !mediaGrid) return;
+
       chatCard.classList.add('call-shell');
-      const toolbar = document.createElement('div');
-      toolbar.className = 'call-toolbar';
-      const voicePanel = mediaGrid.querySelector('#voice-toggle')?.closest('.media-panel');
-      const cameraPanel = mediaGrid.querySelector('#camera-toggle')?.closest('.media-panel');
-      if (cameraPanel) {
-        const askButton = cameraPanel.querySelector('#camera-ask');
-        if (askButton) { askButton.style.display = 'none'; controls.appendChild(askButton); }
-        const preview = cameraPanel.querySelector('#camera-preview');
-        if (preview) chatCard.insertBefore(preview, chatCard.querySelector('#chatlog'));
-        const cameraStatusNode = cameraPanel.querySelector('#camera-status');
-        if (cameraStatusNode) chatCard.insertBefore(cameraStatusNode, chatCard.querySelector('#chatlog'));
-      }
-      if (voicePanel) {
-        const voiceStatusNode = voicePanel.querySelector('#voice-status');
-        if (voiceStatusNode) chatCard.appendChild(voiceStatusNode);
-      }
       const controls = document.createElement('div');
       controls.className = 'call-toolbar';
-      if (voicePanel) {
-        const voiceToggle = voicePanel.querySelector('#voice-toggle');
-        const voiceStop = voicePanel.querySelector('#voice-stop');
-        if (voiceToggle) { voiceToggle.textContent = '🎙 Микрофон'; controls.appendChild(voiceToggle); }
-        if (voiceStop) { voiceStop.textContent = '■ Стоп'; controls.appendChild(voiceStop); }
-      }
+
+      const voicePanel = mediaGrid.querySelector('#voice-toggle')?.closest('.media-panel');
+      const cameraPanel = mediaGrid.querySelector('#camera-toggle')?.closest('.media-panel');
+      const log = chatCard.querySelector('#chatlog');
+      const form = chatCard.querySelector('#chatform');
+      const status = chatCard.querySelector('#chatstatus');
+      if (!log || !form || !status) return;
+
+      const cameraToggle = cameraPanel && cameraPanel.querySelector('#camera-toggle');
+      const voiceToggle = voicePanel && voicePanel.querySelector('#voice-toggle');
+      const voiceStop = voicePanel && voicePanel.querySelector('#voice-stop');
+
       if (cameraPanel) {
-        const cameraToggle = cameraPanel.querySelector('#camera-toggle');
-        if (cameraToggle) { cameraToggle.textContent = '▣ Видео'; controls.appendChild(cameraToggle); }
+        const preview = cameraPanel.querySelector('#camera-preview');
+        const cameraStatusNode = cameraPanel.querySelector('#camera-status');
+        if (preview) chatCard.insertBefore(preview, log);
+        if (cameraStatusNode) chatCard.insertBefore(cameraStatusNode, log);
+        const askButton = cameraPanel.querySelector('#camera-ask');
+        if (askButton) askButton.style.display = 'none';
+        if (cameraToggle) {
+          cameraToggle.textContent = '▣ Видео';
+          cameraToggle.setAttribute('aria-label', 'Включить или выключить видео');
+          controls.appendChild(cameraToggle);
+        }
       }
+
+      if (voicePanel) {
+        const voiceStatusNode = voicePanel.querySelector('#voice-status');
+        if (voiceStatusNode) chatCard.insertBefore(voiceStatusNode, log);
+        if (voiceToggle) {
+          voiceToggle.textContent = '🎙 Микрофон';
+          voiceToggle.setAttribute('aria-label', 'Включить или выключить микрофон');
+          controls.appendChild(voiceToggle);
+        }
+        if (voiceStop) {
+          voiceStop.textContent = '■ Стоп';
+          controls.appendChild(voiceStop);
+        }
+      }
+
       const callChatToggle = document.createElement('button');
       callChatToggle.type = 'button';
       callChatToggle.id = 'call-chat-toggle';
       callChatToggle.textContent = '☰ Чат';
       callChatToggle.setAttribute('aria-expanded', 'true');
       controls.appendChild(callChatToggle);
+
       const endCall = document.createElement('button');
       endCall.type = 'button';
       endCall.id = 'call-end';
-      endCall.textContent = '⏻';
-      endCall.title = 'Выключить видео и микрофон';
-      endCall.setAttribute('aria-label', 'Выключить видео и микрофон');
+      endCall.textContent = '⏻ Завершить';
+      endCall.title = 'Выключить видео, микрофон и озвучивание';
+      endCall.setAttribute('aria-label', 'Завершить звонок и выключить видео и микрофон');
       controls.appendChild(endCall);
-      const log = chatCard.querySelector('#chatlog');
-      const form = chatCard.querySelector('#chatform');
-      const status = chatCard.querySelector('#chatstatus');
-      if (log && form && status) {
-        chatCard.insertBefore(controls, log);
-        callChatToggle.addEventListener('click', () => {
-          const show = callChatToggle.getAttribute('aria-expanded') !== 'true';
-          callChatToggle.setAttribute('aria-expanded', String(show));
-          log.style.display = form.style.display = status.style.display = show ? '' : 'none';
-          callChatToggle.textContent = show ? '☰ Чат' : '☰ Показать чат';
-        });
-        endCall.addEventListener('click', () => {
-          if (cameraToggle && cameraStream) cameraToggle.click();
-          if (voiceEnabled) {
-            voiceEnabled = false;
-            if (recognition) { try { recognition.stop(); } catch (_) {} }
-            if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
-            if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-            isSpeaking = false;
+      chatCard.insertBefore(controls, log);
+
+      callChatToggle.addEventListener('click', () => {
+        const show = callChatToggle.getAttribute('aria-expanded') !== 'true';
+        callChatToggle.setAttribute('aria-expanded', String(show));
+        log.hidden = form.hidden = status.hidden = !show;
+        callChatToggle.textContent = show ? '☰ Чат' : '☰ Показать чат';
+      });
+
+      endCall.addEventListener('click', () => {
+        if (cameraToggle && cameraStream) cameraToggle.click();
+        if (voiceEnabled) {
+          voiceEnabled = false;
+          if (recognition) { try { recognition.stop(); } catch (_) {} }
+          if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
+          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+          isSpeaking = false;
+          if (voiceToggle) {
             voiceToggle.textContent = '🎙 Микрофон';
             voiceToggle.setAttribute('aria-pressed', 'false');
-            voiceStatus.textContent = 'Микрофон и озвучивание выключены.';
           }
-          endCall.textContent = '✓';
-          endCall.title = 'Видео и микрофон выключены';
-          setTimeout(() => { endCall.textContent = '⏻'; endCall.title = 'Выключить видео и микрофон'; }, 1200);
-        });
-      }
+          if (voiceStatus) voiceStatus.textContent = 'Микрофон и озвучивание выключены.';
+        }
+        endCall.textContent = '✓ Звонок завершён';
+        endCall.title = 'Видео и микрофон выключены';
+      });
+
       if (voicePanel) voicePanel.remove();
       if (cameraPanel) cameraPanel.remove();
       senses.remove();
