@@ -465,10 +465,22 @@
       send.disabled = true;
       chatstatus.textContent = 'PETBOT думает…';
       try {
+        // Attach a fresh frame to visual questions; descriptive background alone cannot count fingers reliably.
+        let visionImage = '';
+        const visualQuestion = /(сколько.*пальц|пальц.*показыва|что я показываю|что видишь|что на (?:этом )?(?:изображении|картинке|фото)|опиши (?:кадр|изображение|что перед тобой)|how many fingers|what am i showing|what do you see|what is in (?:the )?(?:image|picture|photo))/i.test(text);
+        if (visualQuestion && cameraStream && cameraPreview.readyState >= 2 && cameraPreview.videoWidth > 0) {
+          const frame = document.createElement('canvas');
+          const scale = Math.min(1, 768 / cameraPreview.videoWidth);
+          frame.width = Math.max(1, Math.round(cameraPreview.videoWidth * scale));
+          frame.height = Math.max(1, Math.round(cameraPreview.videoHeight * scale));
+          frame.getContext('2d', { alpha: false }).drawImage(cameraPreview, 0, 0, frame.width, frame.height);
+          visionImage = frame.toDataURL('image/jpeg', 0.78);
+          cameraStatus.textContent = 'Передаю свежий кадр PETBOT для ответа…';
+        }
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ messages: history, vision_context: latestVisionContext })
+          body: JSON.stringify({ messages: history, vision_context: latestVisionContext, vision_image: visionImage || undefined })
         });
         const data = await response.json();
         if (!response.ok || data.ok !== true) {
