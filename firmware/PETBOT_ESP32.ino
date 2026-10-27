@@ -17,7 +17,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.4";
+const char* FIRMWARE_VERSION = "petbot-1.5";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -78,15 +78,21 @@ void drawFace() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
-  display.setCursor(0, 0);
+
+  // Minimal status bar; the face, not text, is the main character.
+  display.setCursor(4, 2);
+  display.print("PET");
+  display.fillCircle(28, 5, 2, SSD1306_WHITE);
+  display.setCursor(98, 2);
+  display.print(WiFi.status() == WL_CONNECTED ? "ONLINE" : "OFF");
 
   if (notificationMessage.length() && (long)(notificationUntil - millis()) > 0) {
-    display.println("PETBOT MESSAGE");
-    display.drawLine(0, 10, 127, 10, SSD1306_WHITE);
+    display.drawLine(4, 12, 123, 12, SSD1306_WHITE);
     String remaining = notificationMessage;
     int lines = 0;
+    display.setCursor(4, 17);
     while (remaining.length() && lines < 4) {
-      int cut = remaining.length() > 21 ? 21 : remaining.length();
+      int cut = remaining.length() > 20 ? 20 : remaining.length();
       if (cut < remaining.length()) {
         int spaceAt = remaining.lastIndexOf(' ', cut);
         if (spaceAt > 0) cut = spaceAt;
@@ -100,89 +106,90 @@ void drawFace() {
     return;
   }
 
-  display.print("PETBOT  ");
-  display.print(
-      WiFi.status() == WL_CONNECTED ? "WiFi" : "Offline"
-  );
+  const int leftX = 37;
+  const int rightX = 91;
+  const int eyeY = 34;
+  const int eyeW = 29;
+  const int eyeH = 35;
+  const int glanceX = (int)roundf(gazeX);
+  const int glanceY = (int)roundf(gazeY);
+  const bool happy = mood == "HAPPY";
+  const bool sleepy = !eyesOpen || mood == "SLEEPY";
+  const bool annoyed = mood == "ANNOYED";
 
-  int leftX = 38;
-  int rightX = 90;
-  int eyeY = 31;
-  int eyeW = 23;
-  int eyeH = 25;
-  int glanceX = (int)roundf(gazeX);
-  int glanceY = (int)roundf(gazeY);
-
-  if (!eyesOpen || mood == "SLEEPY") {
-    display.drawLine(
-        leftX - 10, eyeY, leftX + 10, eyeY, SSD1306_WHITE
-    );
-    display.drawLine(
-        rightX - 10, eyeY, rightX + 10, eyeY, SSD1306_WHITE
-    );
-  } else if (mood == "SURPRISED") {
-    display.drawCircle(leftX, eyeY, 12, SSD1306_WHITE);
-    display.drawCircle(rightX, eyeY, 12, SSD1306_WHITE);
-    display.fillCircle(leftX + glanceX, eyeY + glanceY, 4, SSD1306_WHITE);
-    display.fillCircle(rightX + glanceX, eyeY + glanceY, 4, SSD1306_WHITE);
+  // Vector-inspired face: bold capsule eyes, crisp pupils and small mouth.
+  // Keep all expressions inside the 128x64 OLED safe area.
+  if (sleepy) {
+    display.fillRoundRect(leftX - eyeW/2, eyeY - 4, eyeW, 9, 4, SSD1306_WHITE);
+    display.fillRoundRect(rightX - eyeW/2, eyeY - 4, eyeW, 9, 4, SSD1306_WHITE);
+    display.drawLine(leftX - 8, eyeY + 9, leftX + 8, eyeY + 9, SSD1306_WHITE);
+    display.drawLine(rightX - 8, eyeY + 9, rightX + 8, eyeY + 9, SSD1306_WHITE);
   } else if (mood == "LOVE") {
-    display.fillCircle(leftX - 5 + glanceX, eyeY - 3 + glanceY, 6, SSD1306_WHITE);
-    display.fillCircle(leftX + 5 + glanceX, eyeY - 3 + glanceY, 6, SSD1306_WHITE);
-    display.fillTriangle(
-        leftX - 11 + glanceX, eyeY + glanceY, leftX + 11 + glanceX, eyeY + glanceY,
-        leftX + glanceX, eyeY + 13 + glanceY, SSD1306_WHITE
-    );
-
-    display.fillCircle(rightX - 5 + glanceX, eyeY - 3 + glanceY, 6, SSD1306_WHITE);
-    display.fillCircle(rightX + 5 + glanceX, eyeY - 3 + glanceY, 6, SSD1306_WHITE);
-    display.fillTriangle(
-        rightX - 11 + glanceX, eyeY + glanceY, rightX + 11 + glanceX, eyeY + glanceY,
-        rightX + glanceX, eyeY + 13 + glanceY, SSD1306_WHITE
-    );
-  } else if (mood == "HAPPY" && microAction != "LOOK_LEFT" && microAction != "LOOK_RIGHT" && microAction != "LOOK_UP") {
-    // Happy: cheerful crescent eyes, visibly different from curious.
-    display.drawLine(leftX - 11, eyeY + 4, leftX - 6, eyeY - 3, SSD1306_WHITE);
-    display.drawLine(leftX - 6, eyeY - 3, leftX, eyeY - 6, SSD1306_WHITE);
-    display.drawLine(leftX, eyeY - 6, leftX + 6, eyeY - 3, SSD1306_WHITE);
-    display.drawLine(leftX + 6, eyeY - 3, leftX + 11, eyeY + 4, SSD1306_WHITE);
-    display.drawLine(rightX - 11, eyeY + 4, rightX - 6, eyeY - 3, SSD1306_WHITE);
-    display.drawLine(rightX - 6, eyeY - 3, rightX, eyeY - 6, SSD1306_WHITE);
-    display.drawLine(rightX, eyeY - 6, rightX + 6, eyeY - 3, SSD1306_WHITE);
-    display.drawLine(rightX + 6, eyeY - 3, rightX + 11, eyeY + 4, SSD1306_WHITE);
-  } else {
-    if (mood == "ANNOYED") {
-      display.drawLine(
-          leftX - 12, eyeY - 15,
-          leftX + 8, eyeY - 9, SSD1306_WHITE
-      );
-      display.drawLine(
-          rightX - 8, eyeY - 9,
-          rightX + 12, eyeY - 15, SSD1306_WHITE
-      );
+    // Pixel hearts read clearly on a monochrome screen.
+    for (int i = 0; i < 2; i++) {
+      int cx = i == 0 ? leftX : rightX;
+      cx += glanceX;
+      int cy = eyeY - 2 + glanceY;
+      display.fillCircle(cx - 5, cy - 2, 5, SSD1306_WHITE);
+      display.fillCircle(cx + 5, cy - 2, 5, SSD1306_WHITE);
+      display.fillTriangle(cx - 10, cy, cx + 10, cy, cx, cy + 13, SSD1306_WHITE);
     }
+  } else if (mood == "SURPRISED") {
+    display.drawRoundRect(leftX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
+    display.drawRoundRect(rightX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
+    display.fillCircle(leftX + glanceX, eyeY + glanceY, 7, SSD1306_WHITE);
+    display.fillCircle(rightX + glanceX, eyeY + glanceY, 7, SSD1306_WHITE);
+    display.fillCircle(leftX + glanceX, eyeY + glanceY, 3, SSD1306_BLACK);
+    display.fillCircle(rightX + glanceX, eyeY + glanceY, 3, SSD1306_BLACK);
+  } else if (happy) {
+    // Happy crescent eyes with a lifted outer corner.
+    display.drawLine(leftX - 13, eyeY + 3, leftX - 7, eyeY - 5, SSD1306_WHITE);
+    display.drawLine(leftX - 7, eyeY - 5, leftX, eyeY - 8, SSD1306_WHITE);
+    display.drawLine(leftX, eyeY - 8, leftX + 7, eyeY - 5, SSD1306_WHITE);
+    display.drawLine(leftX + 7, eyeY - 5, leftX + 13, eyeY + 3, SSD1306_WHITE);
+    display.drawLine(rightX - 13, eyeY + 3, rightX - 7, eyeY - 5, SSD1306_WHITE);
+    display.drawLine(rightX - 7, eyeY - 5, rightX, eyeY - 8, SSD1306_WHITE);
+    display.drawLine(rightX, eyeY - 8, rightX + 7, eyeY - 5, SSD1306_WHITE);
+    display.drawLine(rightX + 7, eyeY - 5, rightX + 13, eyeY + 3, SSD1306_WHITE);
+  } else {
+    int top = eyeY - eyeH/2;
+    int height = eyeH;
+    if (annoyed) { top += 5; height -= 7; }
+    display.fillRoundRect(leftX - eyeW/2, top, eyeW, height, 11, SSD1306_WHITE);
+    display.fillRoundRect(rightX - eyeW/2, top, eyeW, height, 11, SSD1306_WHITE);
 
-    display.fillRoundRect(
-        leftX - eyeW / 2, eyeY - eyeH / 2,
-        eyeW, eyeH, 8, SSD1306_WHITE
-    );
-    display.fillRoundRect(
-        rightX - eyeW / 2, eyeY - eyeH / 2,
-        eyeW, eyeH, 8, SSD1306_WHITE
-    );
+    int pupilY = eyeY + glanceY;
+    int pupilLX = leftX + 2 + glanceX;
+    int pupilRX = rightX + 2 + glanceX;
+    if (mood == "CURIOUS") pupilY -= 4;
+    if (annoyed) pupilY += 4;
+    display.fillCircle(pupilLX, pupilY, 6, SSD1306_BLACK);
+    display.fillCircle(pupilRX, pupilY, 6, SSD1306_BLACK);
+    // Tiny white catchlights make the eyes feel alive.
+    display.fillCircle(pupilLX - 2, pupilY - 2, 2, SSD1306_WHITE);
+    display.fillCircle(pupilRX - 2, pupilY - 2, 2, SSD1306_WHITE);
 
-    int leftPupilX = leftX + 3;
-    int rightPupilX = rightX + 3;
-    int pupilY = eyeY + 1;
-    if (mood == "CURIOUS") { pupilY = eyeY - 3; leftPupilX -= 2; rightPupilX -= 2; }
-    leftPupilX += glanceX; rightPupilX += glanceX; pupilY += glanceY;
-    if (mood == "ANNOYED") { pupilY = eyeY + 5; }
-    display.fillCircle(leftPupilX, pupilY, 4, SSD1306_BLACK);
-    display.fillCircle(rightPupilX, pupilY, 4, SSD1306_BLACK);
+    if (annoyed) {
+      display.drawLine(leftX - 13, eyeY - 17, leftX + 7, eyeY - 12, SSD1306_WHITE);
+      display.drawLine(rightX - 7, eyeY - 12, rightX + 13, eyeY - 17, SSD1306_WHITE);
+    }
+  }
+
+  // Tiny mouth glyph adds character without cluttering the display.
+  const int mouthY = 56;
+  if (happy || mood == "LOVE") {
+    display.drawLine(59, mouthY - 1, 64, mouthY + 2, SSD1306_WHITE);
+    display.drawLine(64, mouthY + 2, 69, mouthY - 1, SSD1306_WHITE);
+  } else if (annoyed) {
+    display.drawLine(60, mouthY, 68, mouthY - 2, SSD1306_WHITE);
+  } else if (mood == "SURPRISED") {
+    display.drawCircle(64, mouthY, 3, SSD1306_WHITE);
+  } else if (!sleepy) {
+    display.drawLine(61, mouthY, 67, mouthY, SSD1306_WHITE);
   }
 
   display.display();
 }
-
 bool cloudRequest(
     const char* path,
     const String& method,
