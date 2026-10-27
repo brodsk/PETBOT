@@ -79,12 +79,12 @@ void drawFace() {
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
 
-  // Minimal status bar; the face, not text, is the main character.
-  display.setCursor(4, 2);
+  // Compact status bar: fixed-width labels stay inside the 128px OLED.
+  display.setCursor(3, 2);
   display.print("PET");
-  display.fillCircle(28, 5, 2, SSD1306_WHITE);
-  display.setCursor(98, 2);
-  display.print(WiFi.status() == WL_CONNECTED ? "ONLINE" : "OFF");
+  display.fillCircle(25, 5, 2, SSD1306_WHITE);
+  display.setCursor(104, 2);
+  display.print(WiFi.status() == WL_CONNECTED ? "ON" : "OFF");
 
   if (notificationMessage.length() && (long)(notificationUntil - millis()) > 0) {
     display.drawLine(4, 12, 123, 12, SSD1306_WHITE);
