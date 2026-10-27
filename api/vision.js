@@ -49,10 +49,12 @@ module.exports = async function handler(req, res) {
     const description = String(parsed.description || raw).trim().slice(0, 500);
     if (!description) return res.status(502).json({ ok: false, error: "ИИ не вернул описание кадра. Попробуй ещё раз." });
     const importantChange = parsed.important_change === true && Number(parsed.importance) >= 3 && String(parsed.event || "").trim().length > 0;
-    try {
-      await db("petbot_events", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ event_type: "scene_observation", payload: { description, important_change: importantChange, event: importantChange ? String(parsed.event).slice(0, 240) : "", importance: Math.max(1, Math.min(5, Number(parsed.importance) || 1)) } }) });
-      if (importantChange) await db("petbot_events", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ event_type: "scene_important", payload: { description, event: String(parsed.event).slice(0, 240), importance: Number(parsed.importance) } }) });
-    } catch (error) { console.error("PETBOT scene save failed:", error && error.message); }
+    if (importantChange) {
+      try {
+        await db("petbot_events", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ event_type: "scene_observation", payload: { description, important_change: true, event: String(parsed.event).slice(0, 240), importance: Math.max(3, Math.min(5, Number(parsed.importance) || 3)) } }) });
+        await db("petbot_events", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ event_type: "scene_important", payload: { description, event: String(parsed.event).slice(0, 240), importance: Number(parsed.importance) } }) });
+      } catch (error) { console.error("PETBOT scene save failed:", error && error.message); }
+    }
     return res.status(200).json({ ok: true, description, important_change: importantChange, event: importantChange ? String(parsed.event).slice(0, 240) : "" });
   } catch (error) {
     console.error("PETBOT vision error:", error && error.message ? error.message : "unknown");
