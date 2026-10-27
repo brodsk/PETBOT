@@ -541,6 +541,12 @@
       if (cameraPanel) {
         const preview = cameraPanel.querySelector('#camera-preview');
         if (preview) chatCard.insertBefore(preview, chatCard.querySelector('#chatlog'));
+        const cameraStatusNode = cameraPanel.querySelector('#camera-status');
+        if (cameraStatusNode) chatCard.insertBefore(cameraStatusNode, chatCard.querySelector('#chatlog'));
+      }
+      if (voicePanel) {
+        const voiceStatusNode = voicePanel.querySelector('#voice-status');
+        if (voiceStatusNode) chatCard.appendChild(voiceStatusNode);
       }
       const controls = document.createElement('div');
       controls.className = 'call-toolbar';
