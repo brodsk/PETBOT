@@ -80,7 +80,7 @@ module.exports = async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "google/gemini-2.5-flash-lite",
-        messages: [{ role: "system", content: SYSTEM_PROMPT }, ...cleanMessages],
+        messages: [{ role: "system", content: SYSTEM_PROMPT + (typeof body.vision_context === "string" && body.vision_context.trim() ? "\\n\\nКОНТЕКСТ КАМЕРЫ (тихое наблюдение, не отдельное обращение): " + body.vision_context.trim().slice(0, 700) + "\\nУчитывай это только если помогает ответить на сообщение пользователя. Не комментируй камеру сам по себе и не утверждай, что видишь больше описанного." : "") }, ...cleanMessages],
         temperature: 0.8,
         reasoning: { effort: "low" },
         max_tokens: 1200
