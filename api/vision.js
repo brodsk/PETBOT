@@ -18,7 +18,7 @@ module.exports = async function handler(req, res) {
       body: JSON.stringify({
         model: "google/gemini-2.5-flash-lite",
         messages: [{ role: "user", content: [
-          { type: "text", text: "Ты — тихий визуальный наблюдатель PETBOT. Составь краткое описание текущего состояния сцены, чтобы использовать его как контекст для будущего разговора, а не как отдельное сообщение пользователю. Укажи только заметные объекты, людей, действия и изменения обстановки, которые действительно видны. Не обращайся к пользователю, не задавай вопросов и не формулируй разговорную реплику. Не угадывай личность, имя, характер, эмоции, возраст или другие личные данные. Если сцена почти не отличается от обычной, всё равно дай короткое нейтральное описание. Ответ 1–2 предложения." },
+          { type: "text", text: "Ты — тихий визуальный наблюдатель PETBOT. Составь краткое описание текущего состояния сцены, чтобы использовать его как контекст для будущего разговора, а не как отдельное сообщение пользователю. Укажи только заметные объекты, людей, действия и изменения обстановки, которые действительно видны. Не обращайся к пользователю, не задавай вопросов и не формулируй разговорную реплику. Не угадывай личность, имя, характер, эмоции, возраст или другие личные данные. Если сцена почти не отличается от обычной, всё равно дай короткое нейтральное описание. Ответ одним коротким фактическим предложением, максимум 35 слов. Если существенных изменений нет, не придумывай их. Не описывай одно и то же подробно повторно." },
           { type: "image_url", image_url: { url: image, detail: "high" } }
         ] }],
         temperature: 0.2,
@@ -28,6 +28,10 @@ module.exports = async function handler(req, res) {
     const result = await upstream.json().catch(() => ({}));
     if (!upstream.ok) {
       console.error("PETBOT vision gateway error:", upstream.status, result && result.error ? result.error.message : "upstream error");
+      if (upstream.status === 429) {
+        res.setHeader("Retry-After", "90");
+        return res.status(429).json({ ok: false, code: "VISION_RATE_LIMITED", error: "ИИ временно перегружен. Камера сделает паузу и продолжит позже." });
+      }
       return res.status(502).json({ ok: false, code: "VISION_UPSTREAM_ERROR", upstreamStatus: upstream.status, error: "ИИ не смог обработать изображение (HTTP " + upstream.status + "). Проверь ключ AI Gateway и доступность vision-модели в Vercel." });
     }
     const content = result && result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content;
