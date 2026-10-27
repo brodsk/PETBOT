@@ -17,7 +17,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.5";
+const char* FIRMWARE_VERSION = "petbot-1.6";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -257,27 +257,48 @@ void pollCloud() {
     return;
   }
 
-  String receivedMood = jsonStringField(response, "mood");
+  // The cloud can send either "mood" or "emotion". Prefer an explicit
+  // emotion so chat replies can drive the face without a separate button.
+  String receivedMood = jsonStringField(response, "emotion");
+  if (!receivedMood.length()) receivedMood = jsonStringField(response, "mood");
+  receivedMood.toUpperCase();
 
-  if (receivedMood.length() &&
-      receivedMood != lastCloudMood &&
-      (receivedMood == "HAPPY" ||
-       receivedMood == "CURIOUS" ||
-       receivedMood == "SLEEPY" ||
-       receivedMood == "SURPRISED" ||
-       receivedMood == "ANNOYED" ||
-       receivedMood == "LOVE")) {
+  const bool validMood =
+      receivedMood == "HAPPY" ||
+      receivedMood == "CURIOUS" ||
+      receivedMood == "SLEEPY" ||
+      receivedMood == "SURPRISED" ||
+      receivedMood == "ANNOYED" ||
+      receivedMood == "LOVE";
 
+  if (validMood && receivedMood != lastCloudMood) {
     lastCloudMood = receivedMood;
     mood = receivedMood;
-    moodOverrideUntil = millis() + 20000UL;
+    moodOverrideUntil = millis() + 12000UL;
     lastActivity = millis();
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
 
-    Serial.println("Cloud mood: " + mood);
+    Serial.println("Cloud emotion: " + mood);
     drawFace();
   }
 
   String command = jsonStringField(response, "command");
+  command.toUpperCase();
+
+  // Also accept direct expression commands from the admin/chat backend.
+  if (command == "HAPPY" || command == "CURIOUS" ||
+      command == "SLEEPY" || command == "SURPRISED" ||
+      command == "ANNOYED" || command == "LOVE") {
+    if (command != lastCloudMood) {
+      lastCloudMood = command;
+      mood = command;
+      moodOverrideUntil = millis() + 12000UL;
+      lastActivity = millis();
+      nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+      drawFace();
+    }
+    return;
+  }
 
   if (command == "MESSAGE") {
     notificationMessage = jsonStringField(response, "message");
