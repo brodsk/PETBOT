@@ -163,8 +163,34 @@
     .call-shell .media-grid { display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px; }
     .call-shell .media-panel { padding:10px 12px;border-radius:14px; }
     .call-shell .media-panel p { margin:4px 0;font-size:12px; }
-    .call-shell #camera-preview { display:none;width:100%;max-height:460px;aspect-ratio:4/3;object-fit:cover;margin:0 0 10px; }
+    .call-shell { overflow:hidden; padding:0; background:linear-gradient(180deg,#101725,#0b101b); }
+    .call-shell > h2, .call-shell > .muted:first-of-type { margin-left:20px; margin-right:20px; }
+    .call-shell > h2 { padding-top:18px; }
+    .call-shell > .muted:first-of-type { margin-bottom:12px; }
+    .call-shell #camera-preview {
+      display:none; width:100%; max-height:none; aspect-ratio:16/9; object-fit:cover;
+      margin:0; border:0; border-radius:0; background:#03060b; transform:scaleX(-1);
+    }
+    .call-shell #camera-preview[style*="display: block"] { display:block; }
+    .call-shell .call-toolbar {
+      position:relative; padding:14px 16px; background:#0b101b;
+      border-top:1px solid #263149; border-bottom:1px solid #263149;
+    }
+    .call-shell .call-toolbar button { min-height:48px; flex:0 1 auto; }
     .call-shell #voice-stop { display:none; }
+    .call-shell #call-end {
+      background:#b9384b; border-color:#d34b5d; color:#fff;
+      min-width:56px; font-weight:700;
+    }
+    .call-shell #call-chat-toggle { background:#202b42; }
+    .call-shell #chatlog { margin:0; padding:16px; min-height:130px; max-height:300px; }
+    .call-shell #chatform { margin:0 14px 12px; }
+    .call-shell #chatstatus { margin:0 18px 14px; }
+    .call-shell #camera-status, .call-shell #voice-status {
+      margin:0; padding:8px 16px; background:#0b101b; font-size:12px;
+    }
+    .call-shell #voice-status { display:none; }
+    .call-shell #camera-ask { display:none !important; }
     .call-shell .media-panel .label { display:none; }
     .call-shell .call-toggle-label { display:inline; }
     @media(max-width:700px){.call-shell #camera-preview{max-height:52vh}.call-shell .call-toolbar{gap:8px}.call-shell .call-toolbar button{flex:1;min-width:0}}
@@ -569,6 +595,13 @@
       callChatToggle.textContent = '☰ Чат';
       callChatToggle.setAttribute('aria-expanded', 'true');
       controls.appendChild(callChatToggle);
+      const endCall = document.createElement('button');
+      endCall.type = 'button';
+      endCall.id = 'call-end';
+      endCall.textContent = '⏻';
+      endCall.title = 'Выключить видео и микрофон';
+      endCall.setAttribute('aria-label', 'Выключить видео и микрофон');
+      controls.appendChild(endCall);
       const log = chatCard.querySelector('#chatlog');
       const form = chatCard.querySelector('#chatform');
       const status = chatCard.querySelector('#chatstatus');
@@ -578,6 +611,23 @@
           const show = callChatToggle.getAttribute('aria-expanded') !== 'true';
           callChatToggle.setAttribute('aria-expanded', String(show));
           log.style.display = form.style.display = status.style.display = show ? '' : 'none';
+          callChatToggle.textContent = show ? '☰ Чат' : '☰ Показать чат';
+        });
+        endCall.addEventListener('click', () => {
+          if (cameraToggle && cameraStream) cameraToggle.click();
+          if (voiceEnabled) {
+            voiceEnabled = false;
+            if (recognition) { try { recognition.stop(); } catch (_) {} }
+            if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
+            if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+            isSpeaking = false;
+            voiceToggle.textContent = '🎙 Микрофон';
+            voiceToggle.setAttribute('aria-pressed', 'false');
+            voiceStatus.textContent = 'Микрофон и озвучивание выключены.';
+          }
+          endCall.textContent = '✓';
+          endCall.title = 'Видео и микрофон выключены';
+          setTimeout(() => { endCall.textContent = '⏻'; endCall.title = 'Выключить видео и микрофон'; }, 1200);
         });
       }
       if (voicePanel) voicePanel.remove();
