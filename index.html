@@ -285,6 +285,7 @@
     const moodLabels = { HAPPY: 'Радость', CURIOUS: 'Любопытство', SLEEPY: 'Сонный', SURPRISED: 'Удивление', ANNOYED: 'Недовольство', LOVE: 'Симпатия' };
     const moodFaces = { HAPPY: '😊', CURIOUS: '👀', SLEEPY: '😴', SURPRISED: '😮', ANNOYED: '😠', LOVE: '💚' };
     const HISTORY_KEY = 'petbot-chat-history-v1';
+    const VISION_COOLDOWN_KEY = 'petbot-vision-cooldown-v1';
     let history = loadHistory();
 
     function loadHistory() {
@@ -294,7 +295,7 @@
         return saved.filter(item =>
           item && ['user', 'assistant'].includes(item.role) &&
           typeof item.content === 'string' && item.content.trim()
-        ).slice(-10);
+        ).slice(-16);
       } catch (_) {
         return [];
       }
@@ -302,7 +303,7 @@
 
     function saveHistory() {
       try {
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-10)));
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-16)));
       } catch (_) {
         chatstatus.textContent = 'Не удалось сохранить память чата на этом устройстве.';
       }
@@ -518,6 +519,8 @@
     let lastVisionDescription = '';
     let latestVisionContext = '';
     let lastVisionScanAt = 0;
+    let visionBackoffUntil = 0;
+    let lastVisionErrorAt = 0;
     let visionBusy = false;
     let faceDetector = null;
     let faceSeen = false;
@@ -658,38 +661,50 @@
 
 
     async function analyzeCameraFrame() {
-      if (!cameraStream || cameraPreview.readyState < 2 || visionBusy) return;
-      // Keep vision calls low-frequency to avoid gateway rate limits.
-      if (Date.now() - lastVisionScanAt < 25000) return;
-      lastVisionScanAt = Date.now();
+      const now = Date.now();
+      if (!cameraStream || cameraPreview.readyState < 2 || visionBusy || now < visionBackoffUntil) return;
+      // Observe sparingly; never turn a camera frame into an unsolicited chat message.
+      if (now - lastVisionScanAt < 45000) return;
+      lastVisionScanAt = now;
       visionBusy = true;
       try {
         const canvas = document.createElement('canvas');
-        const scale = Math.min(1, 640 / cameraPreview.videoWidth);
+        const scale = Math.min(1, 512 / cameraPreview.videoWidth);
         canvas.width = Math.max(1, Math.round(cameraPreview.videoWidth * scale));
         canvas.height = Math.max(1, Math.round(cameraPreview.videoHeight * scale));
-        canvas.getContext('2d').drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
+        const context = canvas.getContext('2d', { alpha: false });
+        context.drawImage(cameraPreview, 0, 0, canvas.width, canvas.height);
         const response = await fetch('/api/vision', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-          body: JSON.stringify({ image: canvas.toDataURL('image/jpeg', 0.72) })
+          body: JSON.stringify({ image: canvas.toDataURL('image/jpeg', 0.62) })
         });
-        const data = await response.json();
-        if (!response.ok || data.ok !== true) throw new Error(data.error || 'Не удалось проанализировать кадр.');
-        const description = String(data.description || '').trim();
-        cameraStatus.textContent = 'Камера наблюдает за сценой. PETBOT не будет комментировать каждый кадр.';
-        latestVisionContext = description;
-        // Avoid repeating the same scene into the chat; react only to meaningful changes.
-        if (description && description !== lastVisionDescription) {
-          const changed = lastVisionDescription.length === 0 || descriptionSimilarity(description, lastVisionDescription) < 0.72;
-          lastVisionDescription = description;
-          if (changed) {
-            chatinput.value = 'Наблюдение с камеры (текущая сцена): ' + description + '\nКоротко и естественно отреагируй на то, что действительно видно. Не угадывай личность и не делай выводов о чувствах человека.';
-            document.getElementById('chatform').requestSubmit();
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok !== true) {
+          if (response.status === 429 || response.status === 502 || response.status === 503) {
+            const retrySeconds = Math.max(60, Number(response.headers.get('Retry-After')) || 90);
+            visionBackoffUntil = Date.now() + retrySeconds * 1000;
+            cameraStatus.textContent = 'ИИ временно перегружен. PETBOT продолжит наблюдение примерно через ' + Math.ceil(retrySeconds / 60) + ' мин.';
           }
+          throw new Error(data.error || 'Не удалось проанализировать кадр.');
         }
+        const description = String(data.description || '').trim().slice(0, 700);
+        if (!description) return;
+        const changed = !lastVisionDescription ||
+          descriptionSimilarity(description, lastVisionDescription) < 0.58;
+        if (changed) {
+          lastVisionDescription = description;
+          latestVisionContext = description;
+          cameraStatus.textContent = 'Заметил изменение сцены. Запомнил контекст и жду, когда ты обратишься.';
+        } else {
+          cameraStatus.textContent = 'Камера спокойно наблюдает. Ничего заметно нового — не отвлекаю.';
+        }
+        lastVisionErrorAt = 0;
       } catch (error) {
-        cameraStatus.textContent = 'Автоанализ камеры: ' + (error.message || 'ошибка анализа');
+        if (Date.now() - lastVisionErrorAt > 20000) {
+          if (Date.now() >= visionBackoffUntil) cameraStatus.textContent = error.message || 'Ошибка анализа изображения.';
+          lastVisionErrorAt = Date.now();
+        }
       } finally {
         visionBusy = false;
       }
@@ -791,8 +806,8 @@
           faceDetector = await window.visionTasksPromise;
           cameraStatus.textContent = 'Камера включена. Ищу лицо и анализирую сцену…';
           faceTimer = setInterval(scanForFace, 700);
-          visionTimer = setInterval(analyzeCameraFrame, 30000);
-          setTimeout(analyzeCameraFrame, 5000);
+          visionTimer = setInterval(analyzeCameraFrame, 45000);
+          setTimeout(analyzeCameraFrame, 8000);
         } catch (error) {
           faceDetector = null;
           cameraStatus.textContent = 'Видео работает, но не загрузилась модель распознавания. Проверь интернет и выключи/включи камеру.';
