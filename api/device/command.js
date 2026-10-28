@@ -9,7 +9,7 @@ module.exports = async function handler(req, res) {
   }
   const body = req.body || {};
   const mood = typeof body.mood === "string" ? body.mood.toUpperCase() : "";
-  const allowedCommands = new Set(["PING", "LOOK_AROUND", "SLEEP", "WAKE"]);
+  const allowedCommands = new Set(["PING", "LOOK_AROUND", "SLEEP", "WAKE", "SOUND_ON", "SOUND_OFF"]);
   const command = typeof body.command === "string" ? body.command.toUpperCase() : "";
   const rawMessage = typeof body.message === "string" ? body.message : "";
   const notification = rawMessage.trim().replace(/[\r\n\t]/g, " ").replace(/["\\]/g, "").replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, " ").slice(0, 80).trim();
