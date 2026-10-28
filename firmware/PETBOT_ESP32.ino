@@ -4,7 +4,7 @@
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
   Unused IR input removed; USB Serial RX remains available for provisioning.
-  Piezo sound effects on GPIO25 and analog sound-level input on GPIO34.
+  Piezo-only sound effects on GPIO25 (no speech synthesis); analog sound-level input on GPIO34.
   Motors, UV sensor and camera remain disabled.
 */
 
@@ -70,7 +70,7 @@ unsigned long lastInteractionAt = 0;
 
 void playRobotSound(const String& soundMood) {
   if (!soundEnabled) return;
-  // Short non-blocking-ish sound patterns; tone() duration keeps each call brief.
+  // Short musical/beep patterns only; PETBOT never synthesizes or speaks words.
   if (soundMood == "HAPPY") {
     tone(PETBOT_PIEZO_PIN, 1500, 70);
     delay(90);
@@ -106,7 +106,7 @@ void playRobotSound(const String& soundMood) {
 }
 
 void scheduleNextIdleSound() {
-  // A living companion should vocalize regularly while awake, but remain quiet enough
+  // A living companion should make occasional expressive beeps while awake, but remain quiet enough
   // not to become an irritating alarm. Sleep has a slower, softer vocal rhythm.
   if (mood == "SLEEPY") {
     nextIdleSoundAt = millis() + 14000UL + (esp_random() % 21000UL);
@@ -156,7 +156,7 @@ void updateSoundPersonality() {
     return;
   }
 
-  // Sleep is not silence: occasional low, gentle "snore"/dream chirps make PETBOT
+  // Sleep is not silence: occasional low, gentle dream-like beeps make PETBOT
   // feel alive without keeping the room noisy.
   if (now >= nextIdleSoundAt && now - lastSoundEvent > 1800UL) {
     playIdleSound();
@@ -795,7 +795,7 @@ void updateMicroAction() {
       gazeTargetY = action == 2 ? -4.0f : (action == 3 ? -2.0f : 0.0f);
       microActionUntil = now + 450UL + (esp_random() % 650UL);
 
-      // Occasionally mutter while inspecting the world; not every glance gets a sound.
+      // Occasionally chirp while inspecting the world; not every glance gets a sound.
       if (soundEnabled && (esp_random() % 100) < 16 && now - lastMoodSoundAt > 5000UL) {
         if (action == 0 || action == 1) {
           tone(PETBOT_PIEZO_PIN, 950 + (esp_random() % 500), 45);
