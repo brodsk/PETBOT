@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v1.9
+  PETBOT firmware v2.0
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.9";
+const char* FIRMWARE_VERSION = "petbot-2.0";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -592,14 +592,25 @@ void setup() {
 }
 
 String chooseAutonomousMood(const String& current) {
-  // Small personality loop: keep changing expressions, but never repeat
-  // the current one immediately. Cloud-selected moods get a temporary hold.
-  const char* choices[] = {
-    "CURIOUS", "HAPPY", "LOVE", "SURPRISED", "ANNOYED", "SLEEPY", "SAD"
-  };
-  String next = current;
-  for (int attempt = 0; attempt < 8 && next == current; attempt++) {
-    next = choices[esp_random() % 7];
+  // PETBOT should feel curious and warm, not like a slot machine of random emotions.
+  // Sleep is driven by inactivity; LOVE and ANNOYED are reserved for meaningful events.
+  const unsigned long idleFor = millis() - lastActivity;
+
+  if (idleFor > 120000UL) return "SLEEPY";
+
+  // Mostly curious, with occasional happy/surprised moments. Avoid abrupt sadness,
+  // annoyance or love without a reason.
+  const uint32_t roll = esp_random() % 100;
+  String next;
+  if (idleFor > 45000UL) {
+    next = roll < 52 ? "CURIOUS" : roll < 82 ? "HAPPY" : "SLEEPY";
+  } else {
+    next = roll < 48 ? "CURIOUS" : roll < 78 ? "HAPPY" : "SURPRISED";
+  }
+
+  if (next == current) {
+    if (current == "CURIOUS") next = roll < 65 ? "HAPPY" : "SURPRISED";
+    else next = "CURIOUS";
   }
   return next;
 }
@@ -656,40 +667,57 @@ void updateMicroAction() {
 void updateAutonomousMood() {
   const unsigned long now = millis();
   const bool connected = WiFi.status() == WL_CONNECTED;
+  const unsigned long idleFor = now - lastActivity;
 
   if (nextAutonomousMoodAt == 0) {
-    nextAutonomousMoodAt = now + 2500UL + (esp_random() % 2500UL);
+    nextAutonomousMoodAt = now + 5000UL + (esp_random() % 5000UL);
   }
 
   if (!connected) {
     if (wifiWasConnected || wifiLostAt == 0) wifiLostAt = now;
+
+    // Losing connection briefly frustrates PETBOT; prolonged isolation makes it drowsy.
     if (now >= moodOverrideUntil) {
-      String next = (now - wifiLostAt < 12000UL) ? "ANNOYED" : "SLEEPY";
-      if (next != mood) {
-        mood = next;
+      String offlineMood = (now - wifiLostAt < 18000UL) ? "ANNOYED" : "SLEEPY";
+      if (offlineMood != mood) {
+        mood = offlineMood;
         drawFace();
       }
     }
   } else {
     if (!wifiWasConnected) {
+      // Reconnection feels like someone has come back.
       mood = "SURPRISED";
-      moodOverrideUntil = now + 8000UL;
+      playRobotSound(mood);
+      moodOverrideUntil = now + 5000UL;
       lastActivity = now;
-      nextAutonomousMoodAt = moodOverrideUntil + 3000UL;
+      nextAutonomousMoodAt = moodOverrideUntil + 5000UL;
       drawFace();
     } else if (now >= moodOverrideUntil && now >= nextAutonomousMoodAt) {
       String next = chooseAutonomousMood(mood);
-      mood = next;
-      lastActivity = now;
-      // A new expression gets a small matching sound, like Vector's vocal reactions.
-      if (now - lastMoodSoundAt > 2500UL) {
-        playRobotSound(mood);
-        lastMoodSoundAt = now;
+
+      // Idle behavior has a slower rhythm. After two minutes without interaction,
+      // PETBOT settles into sleep instead of endlessly changing expressions.
+      if (idleFor > 120000UL) {
+        next = "SLEEPY";
+      } else if (idleFor < 15000UL && next == "SLEEPY") {
+        next = "CURIOUS";
       }
-      // Expressions last a little different amount of time for a less robotic feel.
-      nextAutonomousMoodAt = now + 3500UL + (esp_random() % 4500UL);
-      drawFace();
-      Serial.println("Autonomous mood: " + mood);
+
+      if (next != mood) {
+        mood = next;
+        drawFace();
+        Serial.println("Autonomous mood: " + mood);
+        // Only occasional sounds: the character should not chirp every few seconds.
+        if (mood != "SLEEPY" && now - lastMoodSoundAt > 12000UL &&
+            (esp_random() % 100) < 22) {
+          playRobotSound(mood);
+          lastMoodSoundAt = now;
+        }
+      }
+
+      // Give each mood room to breathe instead of flipping every few seconds.
+      nextAutonomousMoodAt = now + 12000UL + (esp_random() % 13000UL);
     }
     wifiLostAt = 0;
   }
