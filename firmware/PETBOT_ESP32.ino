@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v2.2
+  PETBOT firmware v2.3
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-2.2";
+const char* FIRMWARE_VERSION = "petbot-2.3";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -84,9 +84,14 @@ void playRobotSound(const String& soundMood) {
     delay(90);
     tone(PETBOT_PIEZO_PIN, 2300, 100);
   } else if (soundMood == "ANNOYED") {
-    tone(PETBOT_PIEZO_PIN, 450, 130);
+    // A tiny grumble, like a toy robot protesting.
+    tone(PETBOT_PIEZO_PIN, 390, 95);
+    delay(105);
+    tone(PETBOT_PIEZO_PIN, 300, 115);
   } else if (soundMood == "SLEEPY") {
     tone(PETBOT_PIEZO_PIN, 650, 160);
+    delay(180);
+    tone(PETBOT_PIEZO_PIN, 470, 210);
   } else if (soundMood == "SAD") {
     tone(PETBOT_PIEZO_PIN, 760, 120);
     delay(140);
@@ -122,7 +127,12 @@ void playIdleSound() {
     else { tone(PETBOT_PIEZO_PIN, 1700, 45); delay(55); tone(PETBOT_PIEZO_PIN, 2200, 65); }
   } else if (mood == "SAD") {
     if (variant == 0) { tone(PETBOT_PIEZO_PIN, 700, 80); delay(95); tone(PETBOT_PIEZO_PIN, 520, 120); }
-    else tone(PETBOT_PIEZO_PIN, 580, 100);
+    else if (variant == 1) tone(PETBOT_PIEZO_PIN, 580, 100);
+    else { tone(PETBOT_PIEZO_PIN, 620, 70); delay(85); tone(PETBOT_PIEZO_PIN, 490, 105); }
+  } else if (mood == "SURPRISED") {
+    if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1750, 45); delay(60); tone(PETBOT_PIEZO_PIN, 2250, 90); }
+    else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 2200, 70); delay(75); tone(PETBOT_PIEZO_PIN, 1650, 55); }
+    else tone(PETBOT_PIEZO_PIN, 1950, 75);
   } else {
     if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1250, 45); delay(65); tone(PETBOT_PIEZO_PIN, 1650, 55); }
     else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 1900, 45); delay(55); tone(PETBOT_PIEZO_PIN, 1450, 60); }
@@ -776,6 +786,22 @@ void updateMicroAction() {
                     action == 3 ? 3.0f : 0.0f;
       gazeTargetY = action == 2 ? -4.0f : (action == 3 ? -2.0f : 0.0f);
       microActionUntil = now + 450UL + (esp_random() % 650UL);
+
+      // Occasionally mutter while inspecting the world; not every glance gets a sound.
+      if (soundEnabled && (esp_random() % 100) < 16 && now - lastMoodSoundAt > 5000UL) {
+        if (action == 0 || action == 1) {
+          tone(PETBOT_PIEZO_PIN, 950 + (esp_random() % 500), 45);
+        } else if (action == 2) {
+          tone(PETBOT_PIEZO_PIN, 1550, 45);
+          delay(55);
+          tone(PETBOT_PIEZO_PIN, 1250, 55);
+        } else {
+          tone(PETBOT_PIEZO_PIN, 1100, 40);
+          delay(50);
+          tone(PETBOT_PIEZO_PIN, 1750, 50);
+        }
+        lastMoodSoundAt = now;
+      }
     }
   }
 
