@@ -1,0 +1,43 @@
+name: Build PETBOT firmware
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "firmware/PETBOT_ESP32.ino"
+      - ".github/workflows/build-firmware.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 platform
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib install "WiFiManager"
+          arduino-cli lib install "Adafruit SSD1306"
+          arduino-cli lib install "Adafruit GFX Library"
+
+      - name: Compile PETBOT
+        run: |
+          mkdir -p build
+          arduino-cli compile --verbose --fqbn esp32:esp32:esp32 --output-dir build firmware
+
+      - name: Upload firmware binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: PETBOT-firmware
+          path: |
+            build/*.bin
+          if-no-files-found: error
+          retention-days: 30
