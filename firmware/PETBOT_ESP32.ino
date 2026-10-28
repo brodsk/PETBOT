@@ -4,6 +4,7 @@
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
   Unused IR input removed; USB Serial RX remains available for provisioning.
+  Piezo sound effects on GPIO25 and analog sound-level input on GPIO34.
   Motors, UV sensor and camera remain disabled.
 */
 
@@ -17,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.7";
+const char* FIRMWARE_VERSION = "petbot-1.8";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -26,6 +27,11 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define OLED_ADDRESS 0x3C
 #define OLED_SDA 21
 #define OLED_SCL 22
+
+// Optional sound hardware: passive piezo on GPIO25; analog microphone OUT on GPIO34.
+#define PETBOT_PIEZO_PIN 25
+#define PETBOT_MIC_PIN 34
+#define PETBOT_MIC_THRESHOLD 1800  // Tune after checking Serial readings for your module.
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -51,6 +57,61 @@ float gazeTargetX = 0.0f;
 float gazeTargetY = 0.0f;
 bool eyesOpen = true;
 bool displayReady = false;
+unsigned long lastSoundSample = 0;
+unsigned long lastSoundEvent = 0;
+int micBaseline = 0;
+int micPeak = 0;
+
+void playRobotSound(const String& soundMood) {
+  // Short non-blocking-ish sound patterns; tone() duration keeps each call brief.
+  if (soundMood == "HAPPY") {
+    tone(PETBOT_PIEZO_PIN, 1500, 70);
+    delay(90);
+    tone(PETBOT_PIEZO_PIN, 2100, 90);
+  } else if (soundMood == "SURPRISED") {
+    tone(PETBOT_PIEZO_PIN, 2300, 120);
+  } else if (soundMood == "LOVE") {
+    tone(PETBOT_PIEZO_PIN, 1700, 70);
+    delay(90);
+    tone(PETBOT_PIEZO_PIN, 1900, 70);
+    delay(90);
+    tone(PETBOT_PIEZO_PIN, 2300, 100);
+  } else if (soundMood == "ANNOYED") {
+    tone(PETBOT_PIEZO_PIN, 450, 130);
+  } else if (soundMood == "SLEEPY") {
+    tone(PETBOT_PIEZO_PIN, 650, 160);
+  } else {
+    tone(PETBOT_PIEZO_PIN, 1200, 55);
+  }
+}
+
+void sampleMicrophone() {
+  const unsigned long now = millis();
+  if (now - lastSoundSample < 25) return;
+  lastSoundSample = now;
+
+  int sample = analogRead(PETBOT_MIC_PIN);
+  if (sample > micPeak) micPeak = sample;
+  else micPeak = (micPeak * 7 + sample) / 8;
+
+  // Analog microphone modules often output a DC-biased signal. Use deviation
+  // from a slowly adapting baseline to detect sharp sounds, not speech content.
+  if (micBaseline == 0) micBaseline = sample;
+  int deviation = abs(sample - micBaseline);
+  micBaseline = (micBaseline * 31 + sample) / 32;
+
+  if (deviation > PETBOT_MIC_THRESHOLD &&
+      now - lastSoundEvent > 1200UL) {
+    lastSoundEvent = now;
+    mood = "SURPRISED";
+    moodOverrideUntil = now + 2200UL;
+    lastActivity = now;
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    drawFace();
+    playRobotSound("SURPRISED");
+    Serial.printf("PETBOT sound detected: adc=%d deviation=%d\\n", sample, deviation);
+  }
+}
 
 String jsonStringField(const String& json, const String& key) {
   String needle = "\"" + key + "\"";
@@ -274,6 +335,7 @@ void pollCloud() {
   if (validMood && receivedMood != lastCloudMood) {
     lastCloudMood = receivedMood;
     mood = receivedMood;
+    playRobotSound(mood);
     moodOverrideUntil = millis() + 12000UL;
     lastActivity = millis();
     nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
@@ -292,6 +354,7 @@ void pollCloud() {
     if (command != lastCloudMood) {
       lastCloudMood = command;
       mood = command;
+      playRobotSound(mood);
       moodOverrideUntil = millis() + 12000UL;
       lastActivity = millis();
       nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
@@ -375,6 +438,10 @@ void handleSerialProvisioning() {
 
 void setup() {
   Serial.begin(115200);
+  pinMode(PETBOT_PIEZO_PIN, OUTPUT);
+  pinMode(PETBOT_MIC_PIN, INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(PETBOT_MIC_PIN, ADC_11db);
 
   petbotPrefs.begin("petbot", true);
   deviceToken = petbotPrefs.getString("device_token", "");
@@ -558,6 +625,7 @@ void loop() {
   }
   updateAutonomousMood();
   updateMicroAction();
+  sampleMicrophone();
 
   if (WiFi.status() != WL_CONNECTED) {
     static unsigned long lastWifiRetry = 0;
