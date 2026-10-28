@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v2.1
+  PETBOT firmware v2.2
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-2.1";
+const char* FIRMWARE_VERSION = "petbot-2.2";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -97,8 +97,13 @@ void playRobotSound(const String& soundMood) {
 }
 
 void scheduleNextIdleSound() {
-  // Vector-like idle chatter: short, occasional electronic chirps, not constant noise.
-  nextIdleSoundAt = millis() + 6500UL + (esp_random() % 15500UL);
+  // A living companion should vocalize regularly while awake, but remain quiet enough
+  // not to become an irritating alarm. Sleep has a slower, softer vocal rhythm.
+  if (mood == "SLEEPY") {
+    nextIdleSoundAt = millis() + 14000UL + (esp_random() % 21000UL);
+  } else {
+    nextIdleSoundAt = millis() + 3800UL + (esp_random() % 8200UL);
+  }
 }
 
 void playIdleSound() {
@@ -128,14 +133,17 @@ void playIdleSound() {
 
 void updateSoundPersonality() {
   const unsigned long now = millis();
+  if (!soundEnabled) return;
   if (nextIdleSoundAt == 0) scheduleNextIdleSound();
 
-  // Don't interrupt a reaction or make sounds while asleep; retry shortly after waking.
-  if (now < moodOverrideUntil || mood == "SLEEPY") {
+  // Let event reactions finish before idle chatter resumes.
+  if (now < moodOverrideUntil) {
     if (now >= nextIdleSoundAt) scheduleNextIdleSound();
     return;
   }
 
+  // Sleep is not silence: occasional low, gentle "snore"/dream chirps make PETBOT
+  // feel alive without keeping the room noisy.
   if (now >= nextIdleSoundAt && now - lastSoundEvent > 1800UL) {
     playIdleSound();
     lastMoodSoundAt = now;
@@ -697,6 +705,8 @@ void setup() {
   }
 
   drawFace();
+  playRobotSound("HAPPY");  // short boot-up greeting once the face is online
+  scheduleNextIdleSound();
 }
 
 String chooseAutonomousMood(const String& current) {
@@ -789,6 +799,8 @@ void updateAutonomousMood() {
       String offlineMood = (now - wifiLostAt < 18000UL) ? "ANNOYED" : "SLEEPY";
       if (offlineMood != mood) {
         mood = offlineMood;
+        playRobotSound(offlineMood);  // grumble at a lost connection, then droop into sleep
+        scheduleNextIdleSound();
         drawFace();
       }
     }
@@ -817,8 +829,8 @@ void updateAutonomousMood() {
         drawFace();
         Serial.println("Autonomous mood: " + mood);
         // Only occasional sounds: the character should not chirp every few seconds.
-        if (mood != "SLEEPY" && now - lastMoodSoundAt > 12000UL &&
-            (esp_random() % 100) < 22) {
+        if (mood != "SLEEPY" && now - lastMoodSoundAt > 7000UL &&
+            (esp_random() % 100) < 35) {
           playRobotSound(mood);
           lastMoodSoundAt = now;
         }
