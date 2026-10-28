@@ -17,7 +17,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.7";
+const char* FIRMWARE_VERSION = "petbot-1.8";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -122,7 +122,7 @@ void drawFace() {
   const int glanceX = (int)roundf(gazeX);
   const int glanceY = (int)roundf(gazeY);
   const bool happy = mood == "HAPPY";
-  const bool sleepy = !eyesOpen || mood == "SLEEPY" || mood == "BORED";
+  const bool sleepy = !eyesOpen || mood == "SLEEPY";
   const bool annoyed = mood == "ANNOYED";
   const bool bored = mood == "BORED";
   const bool thinking = mood == "THINKING";
