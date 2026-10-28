@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v1.8
+  PETBOT firmware v1.9
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.8";
+const char* FIRMWARE_VERSION = "petbot-1.9";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -59,6 +59,8 @@ bool eyesOpen = true;
 bool displayReady = false;
 unsigned long lastSoundSample = 0;
 unsigned long lastSoundEvent = 0;
+unsigned long nextIdleSoundAt = 0;
+unsigned long lastMoodSoundAt = 0;
 int micBaseline = 0;
 int micPeak = 0;
 
@@ -82,6 +84,50 @@ void playRobotSound(const String& soundMood) {
     tone(PETBOT_PIEZO_PIN, 650, 160);
   } else {
     tone(PETBOT_PIEZO_PIN, 1200, 55);
+  }
+}
+
+void scheduleNextIdleSound() {
+  // Vector-like idle chatter: short, occasional electronic chirps, not constant noise.
+  nextIdleSoundAt = millis() + 6500UL + (esp_random() % 15500UL);
+}
+
+void playIdleSound() {
+  // Keep idle sounds brief and vary them by personality.
+  const uint32_t variant = esp_random() % 4;
+  if (mood == "SLEEPY") {
+    if (variant == 0) tone(PETBOT_PIEZO_PIN, 520, 100);
+    else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 700, 70); delay(90); tone(PETBOT_PIEZO_PIN, 560, 110); }
+    else tone(PETBOT_PIEZO_PIN, 620, 65);
+  } else if (mood == "ANNOYED") {
+    if (variant == 0) tone(PETBOT_PIEZO_PIN, 380, 85);
+    else { tone(PETBOT_PIEZO_PIN, 800, 45); delay(65); tone(PETBOT_PIEZO_PIN, 420, 90); }
+  } else if (mood == "LOVE" || mood == "HAPPY") {
+    if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1450, 55); delay(70); tone(PETBOT_PIEZO_PIN, 1850, 75); }
+    else if (variant == 1) tone(PETBOT_PIEZO_PIN, 2050, 55);
+    else { tone(PETBOT_PIEZO_PIN, 1700, 45); delay(55); tone(PETBOT_PIEZO_PIN, 2200, 65); }
+  } else {
+    if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1250, 45); delay(65); tone(PETBOT_PIEZO_PIN, 1650, 55); }
+    else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 1900, 45); delay(55); tone(PETBOT_PIEZO_PIN, 1450, 60); }
+    else if (variant == 2) tone(PETBOT_PIEZO_PIN, 1050, 70);
+    else { tone(PETBOT_PIEZO_PIN, 1550, 40); delay(55); tone(PETBOT_PIEZO_PIN, 2000, 45); delay(60); tone(PETBOT_PIEZO_PIN, 1750, 55); }
+  }
+}
+
+void updateSoundPersonality() {
+  const unsigned long now = millis();
+  if (nextIdleSoundAt == 0) scheduleNextIdleSound();
+
+  // Don't interrupt a reaction or make sounds while asleep; retry shortly after waking.
+  if (now < moodOverrideUntil || mood == "SLEEPY") {
+    if (now >= nextIdleSoundAt) scheduleNextIdleSound();
+    return;
+  }
+
+  if (now >= nextIdleSoundAt && now - lastSoundEvent > 1800UL) {
+    playIdleSound();
+    lastMoodSoundAt = now;
+    scheduleNextIdleSound();
   }
 }
 
@@ -606,6 +652,11 @@ void updateAutonomousMood() {
       String next = chooseAutonomousMood(mood);
       mood = next;
       lastActivity = now;
+      // A new expression gets a small matching sound, like Vector's vocal reactions.
+      if (now - lastMoodSoundAt > 2500UL) {
+        playRobotSound(mood);
+        lastMoodSoundAt = now;
+      }
       // Expressions last a little different amount of time for a less robotic feel.
       nextAutonomousMoodAt = now + 3500UL + (esp_random() % 4500UL);
       drawFace();
@@ -626,6 +677,7 @@ void loop() {
   updateAutonomousMood();
   updateMicroAction();
   sampleMicrophone();
+  updateSoundPersonality();
 
   if (WiFi.status() != WL_CONNECTED) {
     static unsigned long lastWifiRetry = 0;
