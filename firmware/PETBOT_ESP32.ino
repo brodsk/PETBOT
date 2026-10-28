@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-2.0";
+const char* FIRMWARE_VERSION = "petbot-2.1";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -31,7 +31,7 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 // Optional sound hardware: passive piezo on GPIO25; analog microphone OUT on GPIO34.
 #define PETBOT_PIEZO_PIN 25
 #define PETBOT_MIC_PIN 34
-#define PETBOT_MIC_THRESHOLD 240  // ADC delta; tune from Serial readings for your specific mic board.
+#define PETBOT_MIC_THRESHOLD_DEFAULT 240  // ADC delta; tune from Serial readings for your specific mic board.
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -63,8 +63,13 @@ unsigned long nextIdleSoundAt = 0;
 unsigned long lastMoodSoundAt = 0;
 int micBaseline = 0;
 int micPeak = 0;
+int micThreshold = PETBOT_MIC_THRESHOLD_DEFAULT;
+bool soundEnabled = true;
+uint32_t interactionCount = 0;
+unsigned long lastInteractionAt = 0;
 
 void playRobotSound(const String& soundMood) {
+  if (!soundEnabled) return;
   // Short non-blocking-ish sound patterns; tone() duration keeps each call brief.
   if (soundMood == "HAPPY") {
     tone(PETBOT_PIEZO_PIN, 1500, 70);
@@ -154,10 +159,11 @@ void sampleMicrophone() {
   static int soundEnvelope = 0;
   soundEnvelope = max(deviation, (soundEnvelope * 3) / 4);
 
-  if (soundEnvelope > PETBOT_MIC_THRESHOLD &&
+  if (soundEnvelope > micThreshold &&
       now - lastSoundEvent > 1400UL) {
     lastSoundEvent = now;
     lastActivity = now;
+    interactionCount++;
     mood = "SURPRISED";
     moodOverrideUntil = now + 2200UL;
     nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
@@ -165,6 +171,9 @@ void sampleMicrophone() {
     gazeTargetY = -1.0f;
     microAction = "HEARD_SOUND";
     microActionUntil = now + 650UL;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putUInt("interactions", interactionCount);
+    petbotPrefs.end();
     drawFace();
     playRobotSound("SURPRISED");
     Serial.printf("PETBOT sound: adc=%d baseline=%d delta=%d envelope=%d\\n",
@@ -464,6 +473,17 @@ void pollCloud() {
   }
 }
 
+void printPetbotHelp() {
+  Serial.println("PETBOT commands:");
+  Serial.println("STATUS - connection, mood, sound, mic threshold, interactions");
+  Serial.println("HELP - show commands");
+  Serial.println("PET - affectionate reaction");
+  Serial.println("PLAY - happy sound");
+  Serial.println("SOUND:ON / SOUND:OFF");
+  Serial.println("MIC:THRESHOLD=240 - set sound sensitivity (50..1500)");
+  Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
+}
+
 void handleSerialProvisioning() {
   if (!Serial.available()) return;
 
@@ -499,15 +519,77 @@ void handleSerialProvisioning() {
       );
     }
   } else if (line == "STATUS") {
-    Serial.println(
-        String("Token configured: ") +
-        (deviceToken.length() >= 32 ? "YES" : "NO")
-    );
-    Serial.println(
-        String("Wi-Fi connected: ") +
-        (WiFi.status() == WL_CONNECTED ? "YES" : "NO")
-    );
+    Serial.println(String("Firmware: ") + FIRMWARE_VERSION);
+    Serial.println(String("Token configured: ") + (deviceToken.length() >= 32 ? "YES" : "NO"));
+    Serial.println(String("Wi-Fi connected: ") + (WiFi.status() == WL_CONNECTED ? "YES" : "NO"));
+    Serial.println(String("Mood: ") + mood);
+    Serial.println(String("Sound enabled: ") + (soundEnabled ? "YES" : "NO"));
+    Serial.println(String("Mic threshold: ") + micThreshold);
+    Serial.println(String("Interactions: ") + interactionCount);
+    Serial.println(String("Free heap: ") + ESP.getFreeHeap());
+  } else if (line == "HELP") {
+    printPetbotHelp();
+  } else if (line == "PET") {
+    interactionCount++;
+    lastActivity = millis();
+    mood = "LOVE";
+    moodOverrideUntil = millis() + 9000UL;
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putUInt("interactions", interactionCount);
+    petbotPrefs.end();
+    playRobotSound("LOVE");
+    drawFace();
+    Serial.println("PETBOT: happy to see you!");
+  } else if (line == "PLAY") {
+    playRobotSound("HAPPY");
+  } else if (line == "SOUND:ON") {
+    soundEnabled = true;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("sound", true);
+    petbotPrefs.end();
+    Serial.println("Sound enabled.");
+  } else if (line == "SOUND:OFF") {
+    soundEnabled = false;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("sound", false);
+    petbotPrefs.end();
+    Serial.println("Sound muted.");
+  } else if (line.startsWith("MIC:THRESHOLD=")) {
+    int value = line.substring(14).toInt();
+    if (value >= 50 && value <= 1500) {
+      micThreshold = value;
+      petbotPrefs.begin("petbot", false);
+      petbotPrefs.putInt("mic_threshold", micThreshold);
+      petbotPrefs.end();
+      Serial.println(String("Mic threshold set to ") + micThreshold);
+    } else {
+      Serial.println("Threshold must be between 50 and 1500.");
+    }
+  } else if (line == "MIC:CAL") {
+    Serial.println("Calibrating microphone for 3 seconds. Keep the room quiet...");
+    long total = 0;
+    int minimum = 4095;
+    int maximum = 0;
+    const unsigned long started = millis();
+    uint32_t count = 0;
+    while (millis() - started < 3000UL) {
+      int value = analogRead(PETBOT_MIC_PIN);
+      total += value;
+      minimum = min(minimum, value);
+      maximum = max(maximum, value);
+      count++;
+      delay(5);
+    }
+    micBaseline = count ? (int)(total / (long)count) : 0;
+    int noiseSpan = maximum - minimum;
+    micThreshold = constrain(noiseSpan * 3, 80, 1500);
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putInt("mic_threshold", micThreshold);
+    petbotPrefs.end();
+    Serial.printf("Mic calibrated: baseline=%d noise-span=%d threshold=%d\\n", micBaseline, noiseSpan, micThreshold);
   } else if (line.length()) {
+    Serial.println("Unknown command. Type HELP.");
   }
 }
 
@@ -518,8 +600,11 @@ void setup() {
   analogReadResolution(12);
   analogSetPinAttenuation(PETBOT_MIC_PIN, ADC_11db);
 
-  petbotPrefs.begin("petbot", true);
+  petbotPrefs.begin("petbot", false);
   deviceToken = petbotPrefs.getString("device_token", "");
+  soundEnabled = petbotPrefs.getBool("sound", true);
+  micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
+  interactionCount = petbotPrefs.getUInt("interactions", 0);
   petbotPrefs.end();
 
   Serial.println(
@@ -529,6 +614,8 @@ void setup() {
       String("Device token configured: ") +
       (deviceToken.length() >= 32 ? "YES" : "NO")
   );
+  Serial.println(String("Mic threshold: ") + micThreshold + " | sound: " + (soundEnabled ? "ON" : "OFF"));
+  printPetbotHelp();
 
   Wire.begin(OLED_SDA, OLED_SCL);
   displayReady = display.begin(
