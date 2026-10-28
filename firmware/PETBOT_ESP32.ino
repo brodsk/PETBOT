@@ -467,6 +467,27 @@ void pollCloud() {
       mood = "CURIOUS";
     } else if (command == "LOOK_AROUND") {
       mood = "SURPRISED";
+    } else if (command == "PET" || command == "LOVE") {
+      interactionCount++;
+      lastActivity = millis();
+      mood = "LOVE";
+      moodOverrideUntil = millis() + 9000UL;
+      petbotPrefs.begin("petbot", false);
+      petbotPrefs.putUInt("interactions", interactionCount);
+      petbotPrefs.end();
+      playRobotSound("LOVE");
+    } else if (command == "PLAY") {
+      playRobotSound("HAPPY");
+    } else if (command == "MUTE") {
+      soundEnabled = false;
+      petbotPrefs.begin("petbot", false);
+      petbotPrefs.putBool("sound", false);
+      petbotPrefs.end();
+    } else if (command == "UNMUTE") {
+      soundEnabled = true;
+      petbotPrefs.begin("petbot", false);
+      petbotPrefs.putBool("sound", true);
+      petbotPrefs.end();
     }
 
     drawFace();
