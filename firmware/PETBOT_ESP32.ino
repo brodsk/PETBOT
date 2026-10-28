@@ -31,7 +31,7 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 // Optional sound hardware: passive piezo on GPIO25; analog microphone OUT on GPIO34.
 #define PETBOT_PIEZO_PIN 25
 #define PETBOT_MIC_PIN 34
-#define PETBOT_MIC_THRESHOLD 1800  // Tune after checking Serial readings for your module.
+#define PETBOT_MIC_THRESHOLD 240  // ADC delta; tune from Serial readings for your specific mic board.
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -82,6 +82,10 @@ void playRobotSound(const String& soundMood) {
     tone(PETBOT_PIEZO_PIN, 450, 130);
   } else if (soundMood == "SLEEPY") {
     tone(PETBOT_PIEZO_PIN, 650, 160);
+  } else if (soundMood == "SAD") {
+    tone(PETBOT_PIEZO_PIN, 760, 120);
+    delay(140);
+    tone(PETBOT_PIEZO_PIN, 520, 190);
   } else {
     tone(PETBOT_PIEZO_PIN, 1200, 55);
   }
@@ -106,6 +110,9 @@ void playIdleSound() {
     if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1450, 55); delay(70); tone(PETBOT_PIEZO_PIN, 1850, 75); }
     else if (variant == 1) tone(PETBOT_PIEZO_PIN, 2050, 55);
     else { tone(PETBOT_PIEZO_PIN, 1700, 45); delay(55); tone(PETBOT_PIEZO_PIN, 2200, 65); }
+  } else if (mood == "SAD") {
+    if (variant == 0) { tone(PETBOT_PIEZO_PIN, 700, 80); delay(95); tone(PETBOT_PIEZO_PIN, 520, 120); }
+    else tone(PETBOT_PIEZO_PIN, 580, 100);
   } else {
     if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1250, 45); delay(65); tone(PETBOT_PIEZO_PIN, 1650, 55); }
     else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 1900, 45); delay(55); tone(PETBOT_PIEZO_PIN, 1450, 60); }
@@ -137,25 +144,31 @@ void sampleMicrophone() {
   lastSoundSample = now;
 
   int sample = analogRead(PETBOT_MIC_PIN);
-  if (sample > micPeak) micPeak = sample;
-  else micPeak = (micPeak * 7 + sample) / 8;
 
-  // Analog microphone modules often output a DC-biased signal. Use deviation
-  // from a slowly adapting baseline to detect sharp sounds, not speech content.
+  // Track the DC baseline and react to rapid changes in microphone level.
+  // This detects sounds, but does not identify words or understand speech.
   if (micBaseline == 0) micBaseline = sample;
   int deviation = abs(sample - micBaseline);
-  micBaseline = (micBaseline * 31 + sample) / 32;
+  micBaseline = (micBaseline * 15 + sample) / 16;
 
-  if (deviation > PETBOT_MIC_THRESHOLD &&
-      now - lastSoundEvent > 1200UL) {
+  static int soundEnvelope = 0;
+  soundEnvelope = max(deviation, (soundEnvelope * 3) / 4);
+
+  if (soundEnvelope > PETBOT_MIC_THRESHOLD &&
+      now - lastSoundEvent > 1400UL) {
     lastSoundEvent = now;
+    lastActivity = now;
     mood = "SURPRISED";
     moodOverrideUntil = now + 2200UL;
-    lastActivity = now;
     nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    gazeTargetX = (esp_random() & 1) ? -4.0f : 4.0f;
+    gazeTargetY = -1.0f;
+    microAction = "HEARD_SOUND";
+    microActionUntil = now + 650UL;
     drawFace();
     playRobotSound("SURPRISED");
-    Serial.printf("PETBOT sound detected: adc=%d deviation=%d\\n", sample, deviation);
+    Serial.printf("PETBOT sound: adc=%d baseline=%d delta=%d envelope=%d\\n",
+                  sample, micBaseline, deviation, soundEnvelope);
   }
 }
 
@@ -223,6 +236,7 @@ void drawFace() {
   const bool happy = mood == "HAPPY";
   const bool sleepy = !eyesOpen || mood == "SLEEPY";
   const bool annoyed = mood == "ANNOYED";
+  const bool sad = mood == "SAD";
 
   // Vector-inspired face: bold capsule eyes, crisp pupils and small mouth.
   // Keep all expressions inside the 128x64 OLED safe area.
@@ -241,6 +255,16 @@ void drawFace() {
       display.fillCircle(cx + 5, cy - 2, 5, SSD1306_WHITE);
       display.fillTriangle(cx - 10, cy, cx + 10, cy, cx, cy + 13, SSD1306_WHITE);
     }
+  } else if (sad) {
+    // Drooping eyelids and inward-tilted brows create a distinct sad expression.
+    display.fillRoundRect(leftX - 14, eyeY - 12, 28, 27, 10, SSD1306_WHITE);
+    display.fillRoundRect(rightX - 14, eyeY - 12, 28, 27, 10, SSD1306_WHITE);
+    display.fillRect(leftX - 15, eyeY - 13, 30, 9, SSD1306_BLACK);
+    display.fillRect(rightX - 15, eyeY - 13, 30, 9, SSD1306_BLACK);
+    display.fillCircle(leftX + glanceX, eyeY + 4 + glanceY, 5, SSD1306_BLACK);
+    display.fillCircle(rightX + glanceX, eyeY + 4 + glanceY, 5, SSD1306_BLACK);
+    display.drawLine(leftX - 13, eyeY - 18, leftX + 5, eyeY - 12, SSD1306_WHITE);
+    display.drawLine(rightX - 5, eyeY - 12, rightX + 13, eyeY - 18, SSD1306_WHITE);
   } else if (mood == "SURPRISED") {
     display.drawRoundRect(leftX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
     display.drawRoundRect(rightX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
@@ -291,6 +315,9 @@ void drawFace() {
     display.drawLine(60, mouthY, 68, mouthY - 2, SSD1306_WHITE);
   } else if (mood == "SURPRISED") {
     display.drawCircle(64, mouthY, 3, SSD1306_WHITE);
+  } else if (sad) {
+    display.drawLine(58, mouthY + 2, 64, mouthY - 2, SSD1306_WHITE);
+    display.drawLine(64, mouthY - 2, 70, mouthY + 2, SSD1306_WHITE);
   } else if (!sleepy) {
     display.drawLine(61, mouthY, 67, mouthY, SSD1306_WHITE);
   }
@@ -376,7 +403,8 @@ void pollCloud() {
       receivedMood == "SLEEPY" ||
       receivedMood == "SURPRISED" ||
       receivedMood == "ANNOYED" ||
-      receivedMood == "LOVE";
+      receivedMood == "LOVE" ||
+      receivedMood == "SAD";
 
   if (validMood && receivedMood != lastCloudMood) {
     lastCloudMood = receivedMood;
@@ -396,7 +424,8 @@ void pollCloud() {
   // Also accept direct expression commands from the admin/chat backend.
   if (command == "HAPPY" || command == "CURIOUS" ||
       command == "SLEEPY" || command == "SURPRISED" ||
-      command == "ANNOYED" || command == "LOVE") {
+      command == "ANNOYED" || command == "LOVE" ||
+      command == "SAD") {
     if (command != lastCloudMood) {
       lastCloudMood = command;
       mood = command;
@@ -566,11 +595,11 @@ String chooseAutonomousMood(const String& current) {
   // Small personality loop: keep changing expressions, but never repeat
   // the current one immediately. Cloud-selected moods get a temporary hold.
   const char* choices[] = {
-    "CURIOUS", "HAPPY", "LOVE", "SURPRISED", "ANNOYED", "SLEEPY"
+    "CURIOUS", "HAPPY", "LOVE", "SURPRISED", "ANNOYED", "SLEEPY", "SAD"
   };
   String next = current;
   for (int attempt = 0; attempt < 8 && next == current; attempt++) {
-    next = choices[esp_random() % 6];
+    next = choices[esp_random() % 7];
   }
   return next;
 }
