@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v2.3
+  PETBOT firmware v2.4
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-2.3";
+const char* FIRMWARE_VERSION = "petbot-2.4";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -75,6 +75,10 @@ void playRobotSound(const String& soundMood) {
     tone(PETBOT_PIEZO_PIN, 1500, 70);
     delay(90);
     tone(PETBOT_PIEZO_PIN, 2100, 90);
+  } else if (soundMood == "CURIOUS") {
+    tone(PETBOT_PIEZO_PIN, 1050, 55);
+    delay(75);
+    tone(PETBOT_PIEZO_PIN, 1550, 70);
   } else if (soundMood == "SURPRISED") {
     tone(PETBOT_PIEZO_PIN, 2300, 120);
   } else if (soundMood == "LOVE") {
@@ -481,10 +485,13 @@ void pollCloud() {
 
     if (command == "SLEEP") {
       mood = "SLEEPY";
+      playRobotSound("SLEEPY");
     } else if (command == "WAKE" || command == "PING") {
       mood = "CURIOUS";
+      playRobotSound("CURIOUS");
     } else if (command == "LOOK_AROUND") {
       mood = "SURPRISED";
+      playRobotSound("SURPRISED");
     } else if (command == "PET" || command == "LOVE") {
       interactionCount++;
       lastActivity = millis();
@@ -506,6 +513,7 @@ void pollCloud() {
       petbotPrefs.begin("petbot", false);
       petbotPrefs.putBool("sound", true);
       petbotPrefs.end();
+      playRobotSound("HAPPY");
     }
 
     drawFace();
