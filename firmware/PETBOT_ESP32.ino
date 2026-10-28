@@ -27,6 +27,10 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define OLED_SDA 21
 #define OLED_SCL 22
 
+// Optional TTP223 touch input. Keep disabled until a free GPIO is verified.
+#define PETBOT_TOUCH_PIN -1
+#define PETBOT_TOUCH_ACTIVE_HIGH 1
+
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 String mood = "CURIOUS";
@@ -51,6 +55,10 @@ float gazeTargetX = 0.0f;
 float gazeTargetY = 0.0f;
 bool eyesOpen = true;
 bool displayReady = false;
+#if PETBOT_TOUCH_PIN >= 0
+unsigned long lastTouchAt = 0;
+bool previousTouchState = false;
+#endif
 
 String jsonStringField(const String& json, const String& key) {
   String needle = "\"" + key + "\"";
@@ -351,6 +359,25 @@ void pollCloud() {
   }
 }
 
+void updateTouchSensor() {
+#if PETBOT_TOUCH_PIN >= 0
+  const bool touched = digitalRead(PETBOT_TOUCH_PIN) == (PETBOT_TOUCH_ACTIVE_HIGH ? HIGH : LOW);
+  const unsigned long now = millis();
+  if (touched && !previousTouchState && now - lastTouchAt >= 350UL) {
+    lastTouchAt = now;
+    mood = "LOVE";
+    lastActivity = now;
+    moodOverrideUntil = now + 3500UL;
+    nextAutonomousMoodAt = moodOverrideUntil + 500UL;
+    microAction = "";
+    notificationMessage = "";
+    Serial.println("Touch detected: LOVE");
+    drawFace();
+  }
+  previousTouchState = touched;
+#endif
+}
+
 void handleSerialProvisioning() {
   if (!Serial.available()) return;
 
@@ -414,6 +441,9 @@ void setup() {
   );
 
   Wire.begin(OLED_SDA, OLED_SCL);
+#if PETBOT_TOUCH_PIN >= 0
+  pinMode(PETBOT_TOUCH_PIN, PETBOT_TOUCH_ACTIVE_HIGH ? INPUT_PULLDOWN : INPUT_PULLUP);
+#endif
   displayReady = display.begin(
       SSD1306_SWITCHCAPVCC, OLED_ADDRESS
   );
@@ -578,6 +608,7 @@ void updateAutonomousMood() {
 
 void loop() {
   handleSerialProvisioning();
+  updateTouchSensor();
   if (notificationMessage.length() && (long)(millis() - notificationUntil) >= 0) {
     notificationMessage = "";
     drawFace();
