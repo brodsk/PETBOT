@@ -4,6 +4,7 @@
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
   Unused IR input removed; USB Serial RX remains available for provisioning.
+  Piezo sound effects on GPIO25 and analog sound-level input on GPIO34.
   Motors, UV sensor and camera remain disabled.
 */
 
@@ -17,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-1.7";
+const char* FIRMWARE_VERSION = "petbot-1.8-audio-test";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -26,6 +27,16 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define OLED_ADDRESS 0x3C
 #define OLED_SDA 21
 #define OLED_SCL 22
+
+// Audio test wiring: passive piezo between GPIO25 and GND; analog mic OUT to GPIO34.
+#define PETBOT_PIEZO_PIN 25
+#define PETBOT_MIC_PIN 34
+#define PETBOT_MIC_THRESHOLD 650  // tune from Serial readings after first test
+unsigned long lastSoundSample = 0;
+unsigned long lastPiezoSound = 0;
+int micBaseline = 0;
+int micPeak = 0;
+bool micReady = false;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -51,6 +62,37 @@ float gazeTargetX = 0.0f;
 float gazeTargetY = 0.0f;
 bool eyesOpen = true;
 bool displayReady = false;
+
+void playBeep(uint16_t frequency, uint16_t durationMs) {
+  // Keep effects short and non-blocking enough for the main loop.
+  if (millis() - lastPiezoSound < 180UL) return;
+  lastPiezoSound = millis();
+  tone(PETBOT_PIEZO_PIN, frequency, durationMs);
+}
+
+void updateMicrophone() {
+  const unsigned long now = millis();
+  if (now - lastSoundSample < 20UL) return;
+  lastSoundSample = now;
+  int sample = analogRead(PETBOT_MIC_PIN);
+  int delta = abs(sample - micBaseline);
+  micBaseline = (micBaseline * 31 + sample) / 32;
+  if (delta > micPeak) micPeak = delta;
+  else micPeak = (micPeak * 7) / 8;
+  static unsigned long lastReport = 0;
+  if (now - lastReport >= 1000UL) {
+    lastReport = now;
+    Serial.printf("MIC raw=%d baseline=%d peak=%d\\n", sample, micBaseline, micPeak);
+  }
+  // Initial sound reaction only; adjust threshold using serial output.
+  if (micReady && delta > PETBOT_MIC_THRESHOLD && now - lastPiezoSound > 1500UL) {
+    mood = "SURPRISED";
+    moodOverrideUntil = now + 1800UL;
+    playBeep(1700, 75);
+    drawFace();
+  }
+  micReady = true;
+}
 
 String jsonStringField(const String& json, const String& key) {
   String needle = "\"" + key + "\"";
@@ -388,6 +430,11 @@ void setup() {
       (deviceToken.length() >= 32 ? "YES" : "NO")
   );
 
+  pinMode(PETBOT_PIEZO_PIN, OUTPUT);
+  noTone(PETBOT_PIEZO_PIN);
+  analogReadResolution(12);
+  pinMode(PETBOT_MIC_PIN, INPUT);
+
   Wire.begin(OLED_SDA, OLED_SCL);
   displayReady = display.begin(
       SSD1306_SWITCHCAPVCC, OLED_ADDRESS
@@ -447,6 +494,7 @@ void setup() {
   }
 
   drawFace();
+  playBeep(1200, 70);
 }
 
 String chooseAutonomousMood(const String& current) {
@@ -542,6 +590,9 @@ void updateAutonomousMood() {
       // Expressions last a little different amount of time for a less robotic feel.
       nextAutonomousMoodAt = now + 3500UL + (esp_random() % 4500UL);
       drawFace();
+      if (mood == "HAPPY") playBeep(1900, 65);
+      else if (mood == "SURPRISED") playBeep(1500, 55);
+      else if (mood == "SLEEPY") playBeep(650, 100);
       Serial.println("Autonomous mood: " + mood);
     }
     wifiLostAt = 0;
@@ -558,6 +609,7 @@ void loop() {
   }
   updateAutonomousMood();
   updateMicroAction();
+  updateMicrophone();
 
   if (WiFi.status() != WL_CONNECTED) {
     static unsigned long lastWifiRetry = 0;
