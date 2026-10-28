@@ -27,11 +27,17 @@ module.exports = async function handler(req, res) {
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify({ device_online: true, device_last_seen: new Date().toISOString(), device_info: info, updated_at: new Date().toISOString() })
     });
-    await db("petbot_events", {
-      method: "POST",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ event_type: "device_heartbeat", payload: info })
-    });
+    // Heartbeat must succeed even if optional event-history storage is unavailable.
+    // The dashboard's online status is already updated above; event logging is best-effort.
+    try {
+      await db("petbot_events", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ event_type: "device_heartbeat", payload: info })
+      });
+    } catch (eventError) {
+      console.warn("PETBOT heartbeat event logging skipped", eventError.message);
+    }
     return res.status(200).json({ ok: true, server_time: new Date().toISOString(), poll_after_ms: 5000 });
   } catch (error) {
     return jsonError(res, error);
