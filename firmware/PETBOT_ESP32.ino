@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v2.0
+  PETBOT firmware v2.1
   Board: LILYGO T3 V1.6.1 / ESP32
   Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
   cloud heartbeat and commands, token stored in ESP32 NVS.
