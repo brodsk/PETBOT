@@ -496,12 +496,12 @@ void pollCloud() {
       playRobotSound("LOVE");
     } else if (command == "PLAY") {
       playRobotSound("HAPPY");
-    } else if (command == "MUTE") {
+    } else if (command == "MUTE" || command == "SOUND_OFF") {
       soundEnabled = false;
       petbotPrefs.begin("petbot", false);
       petbotPrefs.putBool("sound", false);
       petbotPrefs.end();
-    } else if (command == "UNMUTE") {
+    } else if (command == "UNMUTE" || command == "SOUND_ON") {
       soundEnabled = true;
       petbotPrefs.begin("petbot", false);
       petbotPrefs.putBool("sound", true);
