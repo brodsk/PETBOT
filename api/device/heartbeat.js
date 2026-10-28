@@ -14,7 +14,7 @@ module.exports = async function handler(req, res) {
     wifi_rssi: Number.isFinite(body.wifi_rssi) ? Math.max(-120, Math.min(0, body.wifi_rssi)) : null,
     free_heap: Number.isFinite(body.free_heap) ? Math.max(0, body.free_heap) : null,
     ip: typeof body.ip === "string" ? body.ip.slice(0, 45) : null,
-    mood: typeof body.mood === "string" && ["HAPPY", "CURIOUS", "SLEEPY", "SURPRISED", "ANNOYED", "LOVE"].includes(body.mood) ? body.mood : null,
+    mood: typeof body.mood === "string" && ["HAPPY", "CURIOUS", "SLEEPY", "SURPRISED", "ANNOYED", "LOVE", "THINKING", "BORED", "EXCITED"].includes(body.mood) ? body.mood : null,
     autonomy: body.autonomy === true,
     battery_mv: Number.isFinite(body.battery_mv) ? Math.max(0, Math.min(6000, body.battery_mv)) : null,
     uv_sensor_connected: body.uv_sensor_connected === true,
