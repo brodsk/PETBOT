@@ -114,8 +114,11 @@ void drawFace() {
   const int glanceX = (int)roundf(gazeX);
   const int glanceY = (int)roundf(gazeY);
   const bool happy = mood == "HAPPY";
-  const bool sleepy = !eyesOpen || mood == "SLEEPY";
+  const bool sleepy = !eyesOpen || mood == "SLEEPY" || mood == "BORED";
   const bool annoyed = mood == "ANNOYED";
+  const bool bored = mood == "BORED";
+  const bool thinking = mood == "THINKING";
+  const bool excited = mood == "EXCITED";
 
   // Vector-inspired face: bold capsule eyes, crisp pupils and small mouth.
   // Keep all expressions inside the 128x64 OLED safe area.
@@ -141,7 +144,7 @@ void drawFace() {
     display.fillCircle(rightX + glanceX, eyeY + glanceY, 7, SSD1306_WHITE);
     display.fillCircle(leftX + glanceX, eyeY + glanceY, 3, SSD1306_BLACK);
     display.fillCircle(rightX + glanceX, eyeY + glanceY, 3, SSD1306_BLACK);
-  } else if (happy) {
+  } else if (happy || excited) {
     // Happy crescent eyes with a lifted outer corner.
     display.drawLine(leftX - 13, eyeY + 3, leftX - 7, eyeY - 5, SSD1306_WHITE);
     display.drawLine(leftX - 7, eyeY - 5, leftX, eyeY - 8, SSD1306_WHITE);
@@ -162,6 +165,8 @@ void drawFace() {
     int pupilLX = leftX + 2 + glanceX;
     int pupilRX = rightX + 2 + glanceX;
     if (mood == "CURIOUS") pupilY -= 4;
+    if (thinking) pupilY -= 7;
+    if (bored) pupilY += 5;
     if (annoyed) pupilY += 4;
     display.fillCircle(pupilLX, pupilY, 6, SSD1306_BLACK);
     display.fillCircle(pupilRX, pupilY, 6, SSD1306_BLACK);
@@ -169,6 +174,15 @@ void drawFace() {
     display.fillCircle(pupilLX - 2, pupilY - 2, 2, SSD1306_WHITE);
     display.fillCircle(pupilRX - 2, pupilY - 2, 2, SSD1306_WHITE);
 
+    if (bored) {
+      display.drawLine(leftX - 13, eyeY - 12, leftX + 13, eyeY - 12, SSD1306_WHITE);
+      display.drawLine(rightX - 13, eyeY - 12, rightX + 13, eyeY - 12, SSD1306_WHITE);
+    }
+    if (thinking) {
+      display.drawPixel(112, 20, SSD1306_WHITE);
+      display.drawPixel(116, 16, SSD1306_WHITE);
+      display.drawPixel(120, 12, SSD1306_WHITE);
+    }
     if (annoyed) {
       display.drawLine(leftX - 13, eyeY - 17, leftX + 7, eyeY - 12, SSD1306_WHITE);
       display.drawLine(rightX - 7, eyeY - 12, rightX + 13, eyeY - 17, SSD1306_WHITE);
@@ -177,7 +191,7 @@ void drawFace() {
 
   // Tiny mouth glyph adds character without cluttering the display.
   const int mouthY = 56;
-  if (happy || mood == "LOVE") {
+  if (happy || excited || mood == "LOVE") {
     display.drawLine(59, mouthY - 1, 64, mouthY + 2, SSD1306_WHITE);
     display.drawLine(64, mouthY + 2, 69, mouthY - 1, SSD1306_WHITE);
   } else if (annoyed) {
@@ -269,7 +283,10 @@ void pollCloud() {
       receivedMood == "SLEEPY" ||
       receivedMood == "SURPRISED" ||
       receivedMood == "ANNOYED" ||
-      receivedMood == "LOVE";
+      receivedMood == "LOVE" ||
+      receivedMood == "THINKING" ||
+      receivedMood == "BORED" ||
+      receivedMood == "EXCITED";
 
   if (validMood && receivedMood != lastCloudMood) {
     lastCloudMood = receivedMood;
@@ -288,7 +305,9 @@ void pollCloud() {
   // Also accept direct expression commands from the admin/chat backend.
   if (command == "HAPPY" || command == "CURIOUS" ||
       command == "SLEEPY" || command == "SURPRISED" ||
-      command == "ANNOYED" || command == "LOVE") {
+      command == "ANNOYED" || command == "LOVE" ||
+      command == "THINKING" || command == "BORED" ||
+      command == "EXCITED") {
     if (command != lastCloudMood) {
       lastCloudMood = command;
       mood = command;
@@ -314,7 +333,13 @@ void pollCloud() {
     lastActivity = millis();
     moodOverrideUntil = millis() + 8000UL;
 
-    if (command == "SLEEP") {
+    if (command == "THINK") {
+      mood = "THINKING";
+    } else if (command == "CHEER") {
+      mood = "EXCITED";
+    } else if (command == "BORED") {
+      mood = "BORED";
+    } else if (command == "SLEEP") {
       mood = "SLEEPY";
     } else if (command == "WAKE" || command == "PING") {
       mood = "CURIOUS";
@@ -453,11 +478,12 @@ String chooseAutonomousMood(const String& current) {
   // Small personality loop: keep changing expressions, but never repeat
   // the current one immediately. Cloud-selected moods get a temporary hold.
   const char* choices[] = {
-    "CURIOUS", "HAPPY", "LOVE", "SURPRISED", "ANNOYED", "SLEEPY"
+    "CURIOUS", "HAPPY", "LOVE", "SURPRISED", "ANNOYED", "SLEEPY",
+    "THINKING", "BORED", "EXCITED"
   };
   String next = current;
   for (int attempt = 0; attempt < 8 && next == current; attempt++) {
-    next = choices[esp_random() % 6];
+    next = choices[esp_random() % 9];
   }
   return next;
 }
