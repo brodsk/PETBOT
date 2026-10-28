@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-2.4";
+const char* FIRMWARE_VERSION = "petbot-2.5";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -70,48 +70,107 @@ unsigned long lastInteractionAt = 0;
 
 void playRobotSound(const String& soundMood) {
   if (!soundEnabled) return;
-  // Short musical/beep patterns only; PETBOT never synthesizes or speaks words.
+
+  // Each emotion has a small family of non-verbal motifs, so reactions feel
+  // less like one repeated notification tone. No speech or voice synthesis.
+  const uint32_t variant = esp_random() % 3;
+
   if (soundMood == "HAPPY") {
-    tone(PETBOT_PIEZO_PIN, 1500, 70);
-    delay(90);
-    tone(PETBOT_PIEZO_PIN, 2100, 90);
+    if (variant == 0) {
+      tone(PETBOT_PIEZO_PIN, 1450, 55); delay(65);
+      tone(PETBOT_PIEZO_PIN, 1850, 65); delay(65);
+      tone(PETBOT_PIEZO_PIN, 2250, 85);
+    } else if (variant == 1) {
+      tone(PETBOT_PIEZO_PIN, 1950, 65); delay(70);
+      tone(PETBOT_PIEZO_PIN, 1550, 45); delay(55);
+      tone(PETBOT_PIEZO_PIN, 2150, 75);
+    } else {
+      tone(PETBOT_PIEZO_PIN, 1650, 45); delay(55);
+      tone(PETBOT_PIEZO_PIN, 2200, 95);
+    }
   } else if (soundMood == "CURIOUS") {
-    tone(PETBOT_PIEZO_PIN, 1050, 55);
-    delay(75);
-    tone(PETBOT_PIEZO_PIN, 1550, 70);
+    if (variant == 0) {
+      tone(PETBOT_PIEZO_PIN, 900, 65); delay(85);
+      tone(PETBOT_PIEZO_PIN, 1450, 75);
+    } else if (variant == 1) {
+      tone(PETBOT_PIEZO_PIN, 1250, 45); delay(60);
+      tone(PETBOT_PIEZO_PIN, 1050, 45); delay(60);
+      tone(PETBOT_PIEZO_PIN, 1600, 80);
+    } else {
+      tone(PETBOT_PIEZO_PIN, 1100, 55); delay(90);
+      tone(PETBOT_PIEZO_PIN, 1750, 60);
+    }
   } else if (soundMood == "SURPRISED") {
-    tone(PETBOT_PIEZO_PIN, 2300, 120);
+    if (variant == 0) tone(PETBOT_PIEZO_PIN, 2350, 115);
+    else if (variant == 1) {
+      tone(PETBOT_PIEZO_PIN, 1850, 50); delay(45);
+      tone(PETBOT_PIEZO_PIN, 2450, 90);
+    } else {
+      tone(PETBOT_PIEZO_PIN, 2200, 70); delay(65);
+      tone(PETBOT_PIEZO_PIN, 1750, 60);
+    }
   } else if (soundMood == "LOVE") {
-    tone(PETBOT_PIEZO_PIN, 1700, 70);
-    delay(90);
-    tone(PETBOT_PIEZO_PIN, 1900, 70);
-    delay(90);
-    tone(PETBOT_PIEZO_PIN, 2300, 100);
+    if (variant == 0) {
+      tone(PETBOT_PIEZO_PIN, 1550, 65); delay(75);
+      tone(PETBOT_PIEZO_PIN, 1850, 65); delay(75);
+      tone(PETBOT_PIEZO_PIN, 2250, 95);
+    } else if (variant == 1) {
+      tone(PETBOT_PIEZO_PIN, 1800, 55); delay(65);
+      tone(PETBOT_PIEZO_PIN, 2100, 55); delay(65);
+      tone(PETBOT_PIEZO_PIN, 1800, 80);
+    } else {
+      tone(PETBOT_PIEZO_PIN, 1650, 50); delay(55);
+      tone(PETBOT_PIEZO_PIN, 2050, 70);
+    }
   } else if (soundMood == "ANNOYED") {
-    // A tiny grumble, like a toy robot protesting.
-    tone(PETBOT_PIEZO_PIN, 390, 95);
-    delay(105);
-    tone(PETBOT_PIEZO_PIN, 300, 115);
+    if (variant == 0) {
+      tone(PETBOT_PIEZO_PIN, 390, 85); delay(95);
+      tone(PETBOT_PIEZO_PIN, 290, 115);
+    } else if (variant == 1) {
+      tone(PETBOT_PIEZO_PIN, 520, 55); delay(45);
+      tone(PETBOT_PIEZO_PIN, 340, 100); delay(55);
+      tone(PETBOT_PIEZO_PIN, 270, 80);
+    } else {
+      tone(PETBOT_PIEZO_PIN, 430, 75); delay(70);
+      tone(PETBOT_PIEZO_PIN, 320, 90);
+    }
   } else if (soundMood == "SLEEPY") {
-    tone(PETBOT_PIEZO_PIN, 650, 160);
-    delay(180);
-    tone(PETBOT_PIEZO_PIN, 470, 210);
+    if (variant == 0) {
+      tone(PETBOT_PIEZO_PIN, 650, 150); delay(165);
+      tone(PETBOT_PIEZO_PIN, 450, 190);
+    } else if (variant == 1) {
+      tone(PETBOT_PIEZO_PIN, 560, 210);
+    } else {
+      tone(PETBOT_PIEZO_PIN, 720, 90); delay(120);
+      tone(PETBOT_PIEZO_PIN, 480, 170);
+    }
   } else if (soundMood == "SAD") {
-    tone(PETBOT_PIEZO_PIN, 760, 120);
-    delay(140);
-    tone(PETBOT_PIEZO_PIN, 520, 190);
+    if (variant == 0) {
+      tone(PETBOT_PIEZO_PIN, 760, 105); delay(125);
+      tone(PETBOT_PIEZO_PIN, 500, 175);
+    } else if (variant == 1) {
+      tone(PETBOT_PIEZO_PIN, 620, 150); delay(100);
+      tone(PETBOT_PIEZO_PIN, 460, 110);
+    } else {
+      tone(PETBOT_PIEZO_PIN, 700, 75); delay(120);
+      tone(PETBOT_PIEZO_PIN, 530, 160);
+    }
   } else {
     tone(PETBOT_PIEZO_PIN, 1200, 55);
   }
+
+  lastMoodSoundAt = millis();
 }
 
 void scheduleNextIdleSound() {
   // A living companion should make occasional expressive beeps while awake, but remain quiet enough
   // not to become an irritating alarm. Sleep has a slower, softer vocal rhythm.
   if (mood == "SLEEPY") {
-    nextIdleSoundAt = millis() + 14000UL + (esp_random() % 21000UL);
+    // Dream chirps are deliberately sparse.
+    nextIdleSoundAt = millis() + 25000UL + (esp_random() % 30000UL);
   } else {
-    nextIdleSoundAt = millis() + 3800UL + (esp_random() % 8200UL);
+    // Leave quiet gaps between spontaneous sounds; event reactions remain immediate.
+    nextIdleSoundAt = millis() + 12000UL + (esp_random() % 16000UL);
   }
 }
 
