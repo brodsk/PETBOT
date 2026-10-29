@@ -192,7 +192,7 @@ void playIdleSound() {
     if (variant == 0) { tone(PETBOT_PIEZO_PIN, 700, 80); delay(95); tone(PETBOT_PIEZO_PIN, 520, 120); }
     else if (variant == 1) tone(PETBOT_PIEZO_PIN, 580, 100);
     else { tone(PETBOT_PIEZO_PIN, 620, 70); delay(85); tone(PETBOT_PIEZO_PIN, 490, 105); }
-  } else if (mood == "SURPRISED" || wideEyes) {
+  } else if (mood == "SURPRISED") {
     if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1750, 45); delay(60); tone(PETBOT_PIEZO_PIN, 2250, 90); }
     else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 2200, 70); delay(75); tone(PETBOT_PIEZO_PIN, 1650, 55); }
     else tone(PETBOT_PIEZO_PIN, 1950, 75);
