@@ -192,7 +192,7 @@ void playIdleSound() {
     if (variant == 0) { tone(PETBOT_PIEZO_PIN, 700, 80); delay(95); tone(PETBOT_PIEZO_PIN, 520, 120); }
     else if (variant == 1) tone(PETBOT_PIEZO_PIN, 580, 100);
     else { tone(PETBOT_PIEZO_PIN, 620, 70); delay(85); tone(PETBOT_PIEZO_PIN, 490, 105); }
-  } else if (mood == "SURPRISED") {
+  } else if (mood == "SURPRISED" || wideEyes) {
     if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1750, 45); delay(60); tone(PETBOT_PIEZO_PIN, 2250, 90); }
     else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 2200, 70); delay(75); tone(PETBOT_PIEZO_PIN, 1650, 55); }
     else tone(PETBOT_PIEZO_PIN, 1950, 75);
@@ -323,9 +323,12 @@ void drawFace() {
   const int eyeH = 35;
   const int glanceX = (int)roundf(gazeX);
   const int glanceY = (int)roundf(gazeY);
-  const bool happy = mood == "HAPPY";
+  const bool excited = microAction == "EXCITED";
+  const bool wideEyes = microAction == "WIDE_EYES";
+  const bool squint = microAction == "SQUINT";
+  const bool happy = mood == "HAPPY" || excited;
   const bool sleepy = !eyesOpen || mood == "SLEEPY";
-  const bool annoyed = mood == "ANNOYED";
+  const bool annoyed = mood == "ANNOYED" || squint;
   const bool sad = mood == "SAD";
 
   // Vector-inspired face: bold capsule eyes, crisp pupils and small mouth.
@@ -844,30 +847,51 @@ void updateMicroAction() {
       nextMicroActionAt = now + 1000UL + (esp_random() % 1600UL);
     }
     if (now >= nextMicroActionAt) {
-      const uint32_t action = esp_random() % 4;
-      microAction = action == 0 ? "LOOK_LEFT" :
-                    action == 1 ? "LOOK_RIGHT" :
-                    action == 2 ? "LOOK_UP" : "LOOK_DIAGONAL";
-      gazeTargetX = action == 0 ? -5.0f :
-                    action == 1 ? 5.0f :
-                    action == 3 ? 3.0f : 0.0f;
-      gazeTargetY = action == 2 ? -4.0f : (action == 3 ? -2.0f : 0.0f);
-      microActionUntil = now + 450UL + (esp_random() % 650UL);
+      // Small autonomous scenes: glances, excited eyes, surprise and a grumpy squint.
+      const uint32_t action = esp_random() % 8;
+      if (action == 0) {
+        microAction = "LOOK_LEFT"; gazeTargetX = -7.0f; gazeTargetY = 0.0f;
+      } else if (action == 1) {
+        microAction = "LOOK_RIGHT"; gazeTargetX = 7.0f; gazeTargetY = 0.0f;
+      } else if (action == 2) {
+        microAction = "LOOK_UP"; gazeTargetX = 0.0f; gazeTargetY = -5.0f;
+      } else if (action == 3) {
+        microAction = "LOOK_DIAGONAL"; gazeTargetX = 5.0f; gazeTargetY = -3.0f;
+      } else if (action == 4) {
+        microAction = "EXCITED"; gazeTargetX = 0.0f; gazeTargetY = -2.0f;
+      } else if (action == 5) {
+        microAction = "WIDE_EYES";
+        gazeTargetX = (esp_random() & 1) ? -3.0f : 3.0f; gazeTargetY = 0.0f;
+      } else if (action == 6) {
+        microAction = "SQUINT"; gazeTargetX = 0.0f; gazeTargetY = 1.0f;
+      } else {
+        microAction = "LOOK_AROUND";
+        gazeTargetX = (esp_random() & 1) ? -7.0f : 7.0f; gazeTargetY = -2.0f;
+      }
+      microActionUntil = now + 750UL + (esp_random() % 950UL);
+      drawFace();
 
-      // Occasionally chirp while inspecting the world; not every glance gets a sound.
-      if (soundEnabled && (esp_random() % 100) < 16 && now - lastMoodSoundAt > 5000UL) {
-        if (action == 0 || action == 1) {
-          tone(PETBOT_PIEZO_PIN, 950 + (esp_random() % 500), 45);
-        } else if (action == 2) {
-          tone(PETBOT_PIEZO_PIN, 1550, 45);
-          delay(55);
-          tone(PETBOT_PIEZO_PIN, 1250, 55);
+      // Action-specific chirps make the sound feel tied to what the face is doing.
+      if (soundEnabled && (esp_random() % 100) < 38 && now - lastMoodSoundAt > 6500UL) {
+        if (microAction == "EXCITED") {
+          tone(PETBOT_PIEZO_PIN, 1450, 50); delay(60);
+          tone(PETBOT_PIEZO_PIN, 2050, 75);
+        } else if (microAction == "WIDE_EYES") {
+          tone(PETBOT_PIEZO_PIN, 2250, 85);
+        } else if (microAction == "SQUINT") {
+          tone(PETBOT_PIEZO_PIN, 430, 70); delay(75);
+          tone(PETBOT_PIEZO_PIN, 320, 90);
+        } else if (microAction == "LOOK_AROUND") {
+          tone(PETBOT_PIEZO_PIN, 1050, 45); delay(55);
+          tone(PETBOT_PIEZO_PIN, 1550, 55); delay(55);
+          tone(PETBOT_PIEZO_PIN, 1250, 45);
+        } else if (microAction == "LOOK_UP") {
+          tone(PETBOT_PIEZO_PIN, 1350, 50); delay(55);
+          tone(PETBOT_PIEZO_PIN, 1700, 60);
         } else {
-          tone(PETBOT_PIEZO_PIN, 1100, 40);
-          delay(50);
-          tone(PETBOT_PIEZO_PIN, 1750, 50);
+          tone(PETBOT_PIEZO_PIN, 950 + (esp_random() % 650), 55);
         }
-        lastMoodSoundAt = now;
+        lastMoodSoundAt = millis();
       }
     }
   }
