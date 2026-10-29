@@ -988,15 +988,30 @@ void updateAutonomousMood() {
   if (!connected) {
     if (wifiWasConnected || wifiLostAt == 0) wifiLostAt = now;
 
-    // Losing connection briefly frustrates PETBOT; prolonged isolation makes it drowsy.
-    if (now >= moodOverrideUntil) {
-      String offlineMood = (now - wifiLostAt < 18000UL) ? "ANNOYED" : "SLEEPY";
-      if (offlineMood != mood) {
-        mood = offlineMood;
-        playRobotSound(offlineMood);  // grumble at a lost connection, then droop into sleep
-        scheduleNextIdleSound();
-        drawFace();
+    // Offline mode must remain fully autonomous: Wi-Fi is only for cloud features.
+    // Do not force sleep merely because the network is unavailable.
+    if (now >= moodOverrideUntil && now >= nextAutonomousMoodAt) {
+      String next = chooseAutonomousMood(mood);
+
+      if (idleFor > 120000UL) {
+        next = "SLEEPY";
+      } else if (idleFor > 60000UL) {
+        next = petMoodValue > 30 ? "SAD" : "SLEEPY";
+      } else if (idleFor < 15000UL && next == "SLEEPY") {
+        next = "CURIOUS";
       }
+
+      if (next != mood) {
+        mood = next;
+        drawFace();
+        Serial.println("Autonomous mood (offline): " + mood);
+        if (mood != "SLEEPY" && now - lastMoodSoundAt > 7000UL &&
+            (esp_random() % 100) < 35) {
+          playRobotSound(mood);
+          lastMoodSoundAt = now;
+        }
+      }
+      nextAutonomousMoodAt = now + 12000UL + (esp_random() % 13000UL);
     }
   } else {
     if (!wifiWasConnected) {
