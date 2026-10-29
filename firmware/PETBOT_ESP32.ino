@@ -123,7 +123,7 @@ void registerPetInteraction(bool affectionate) {
   petMoodValue = min(100, petMoodValue + (affectionate ? 12 : 6));
   petCuriosity = max(10, petCuriosity - 12);
   if (affectionate) petAttachment = min(100, petAttachment + (petAttachment < 60 ? 3 : 1));
-  savePetNeeds();
+  if (now - lastNeedsSave > 60000UL) savePetNeeds();
   petbotPrefs.begin("petbot", false);
   petbotPrefs.putUInt("interactions", interactionCount);
   petbotPrefs.end();
