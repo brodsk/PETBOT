@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-2.5";
+const char* FIRMWARE_VERSION = "petbot-2.6";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -66,6 +66,63 @@ int micPeak = 0;
 int micThreshold = PETBOT_MIC_THRESHOLD_DEFAULT;
 bool soundEnabled = true;
 uint32_t interactionCount = 0;
+
+// Local pet needs/personality model. Runs on the ESP32 even without cloud access.
+int petCuriosity = 58;       // rises during quiet time; positive interaction settles it
+int petEnergy = 88;          // falls while awake and recovers while sleeping
+int petMoodValue = 68;        // general affect, separate from the displayed mood label
+int petAttachment = 12;      // grows gradually through positive interactions
+unsigned long lastNeedsUpdate = 0;
+unsigned long lastNeedsSave = 0;
+
+void savePetNeeds() {
+  petbotPrefs.begin("petbot", false);
+  petbotPrefs.putInt("curiosity", petCuriosity);
+  petbotPrefs.putInt("energy", petEnergy);
+  petbotPrefs.putInt("mood_value", petMoodValue);
+  petbotPrefs.putInt("attachment", petAttachment);
+  petbotPrefs.end();
+  lastNeedsSave = millis();
+}
+
+void updatePetNeeds() {
+  const unsigned long now = millis();
+  if (lastNeedsUpdate == 0) {
+    lastNeedsUpdate = now;
+    return;
+  }
+  const unsigned long elapsed = now - lastNeedsUpdate;
+  if (elapsed < 60000UL) return;
+  const int minutes = (int)min((unsigned long)6, elapsed / 60000UL);
+  lastNeedsUpdate = now;
+
+  const bool sleeping = mood == "SLEEPY" || petEnergy < 14;
+  if (sleeping) {
+    petEnergy = min(100, petEnergy + minutes * 5);
+    petCuriosity = max(8, petCuriosity - minutes * 2);
+    petMoodValue = min(100, petMoodValue + minutes);
+  } else {
+    petEnergy = max(0, petEnergy - minutes);
+    if (now - lastActivity > 12000UL) petCuriosity = min(100, petCuriosity + minutes * 2);
+    if (now - lastActivity > 90000UL) petMoodValue = max(20, petMoodValue - minutes);
+  }
+  if (now - lastNeedsSave > 60000UL) savePetNeeds();
+}
+
+void registerPetInteraction(bool affectionate) {
+  const unsigned long now = millis();
+  lastActivity = now;
+  lastInteractionAt = now;
+  interactionCount++;
+  petEnergy = min(100, petEnergy + 8);
+  petMoodValue = min(100, petMoodValue + (affectionate ? 12 : 6));
+  petCuriosity = max(10, petCuriosity - 12);
+  if (affectionate) petAttachment = min(100, petAttachment + (petAttachment < 60 ? 3 : 1));
+  savePetNeeds();
+  petbotPrefs.begin("petbot", false);
+  petbotPrefs.putUInt("interactions", interactionCount);
+  petbotPrefs.end();
+}
 unsigned long lastInteractionAt = 0;
 
 void playRobotSound(const String& soundMood) {
@@ -243,8 +300,7 @@ void sampleMicrophone() {
   if (soundEnvelope > micThreshold &&
       now - lastSoundEvent > 1400UL) {
     lastSoundEvent = now;
-    lastActivity = now;
-    interactionCount++;
+    registerPetInteraction(false);
     mood = "SURPRISED";
     moodOverrideUntil = now + 2200UL;
     nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
@@ -252,9 +308,6 @@ void sampleMicrophone() {
     gazeTargetY = -1.0f;
     microAction = "HEARD_SOUND";
     microActionUntil = now + 650UL;
-    petbotPrefs.begin("petbot", false);
-    petbotPrefs.putUInt("interactions", interactionCount);
-    petbotPrefs.end();
     drawFace();
     playRobotSound("SURPRISED");
     Serial.printf("PETBOT sound: adc=%d baseline=%d delta=%d envelope=%d\\n",
@@ -555,13 +608,9 @@ void pollCloud() {
       mood = "SURPRISED";
       playRobotSound("SURPRISED");
     } else if (command == "PET" || command == "LOVE") {
-      interactionCount++;
-      lastActivity = millis();
+      registerPetInteraction(true);
       mood = "LOVE";
       moodOverrideUntil = millis() + 9000UL;
-      petbotPrefs.begin("petbot", false);
-      petbotPrefs.putUInt("interactions", interactionCount);
-      petbotPrefs.end();
       playRobotSound("LOVE");
     } else if (command == "PLAY") {
       playRobotSound("HAPPY");
@@ -591,6 +640,7 @@ void printPetbotHelp() {
   Serial.println("SOUND:ON / SOUND:OFF");
   Serial.println("MIC:THRESHOLD=240 - set sound sensitivity (50..1500)");
   Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
+  Serial.println("NEEDS - show curiosity, energy, mood and attachment (C/E/M/A)");
 }
 
 void handleSerialProvisioning() {
@@ -635,18 +685,17 @@ void handleSerialProvisioning() {
     Serial.println(String("Sound enabled: ") + (soundEnabled ? "YES" : "NO"));
     Serial.println(String("Mic threshold: ") + micThreshold);
     Serial.println(String("Interactions: ") + interactionCount);
+    Serial.println(String("Needs C/E/M/A: ") + petCuriosity + "/" + petEnergy + "/" + petMoodValue + "/" + petAttachment);
     Serial.println(String("Free heap: ") + ESP.getFreeHeap());
   } else if (line == "HELP") {
     printPetbotHelp();
+  } else if (line == "NEEDS") {
+    Serial.printf("PETBOT needs: curiosity=%d energy=%d mood=%d attachment=%d interactions=%lu\\n", petCuriosity, petEnergy, petMoodValue, petAttachment, (unsigned long)interactionCount);
   } else if (line == "PET") {
-    interactionCount++;
-    lastActivity = millis();
+    registerPetInteraction(true);
     mood = "LOVE";
     moodOverrideUntil = millis() + 9000UL;
     nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
-    petbotPrefs.begin("petbot", false);
-    petbotPrefs.putUInt("interactions", interactionCount);
-    petbotPrefs.end();
     playRobotSound("LOVE");
     drawFace();
     Serial.println("PETBOT: happy to see you!");
@@ -714,6 +763,10 @@ void setup() {
   soundEnabled = petbotPrefs.getBool("sound", true);
   micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
   interactionCount = petbotPrefs.getUInt("interactions", 0);
+  petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
+  petEnergy = constrain(petbotPrefs.getInt("energy", 88), 0, 100);
+  petMoodValue = constrain(petbotPrefs.getInt("mood_value", 68), 0, 100);
+  petAttachment = constrain(petbotPrefs.getInt("attachment", 12), 0, 100);
   petbotPrefs.end();
 
   Serial.println(
@@ -770,6 +823,7 @@ void setup() {
   Serial.println("IP address: " + WiFi.localIP().toString());
 
   lastActivity = millis();
+  lastNeedsUpdate = millis();
   wifiWasConnected = true;
 
   if (displayReady) {
@@ -794,16 +848,20 @@ String chooseAutonomousMood(const String& current) {
   // Sleep is driven by inactivity; LOVE and ANNOYED are reserved for meaningful events.
   const unsigned long idleFor = millis() - lastActivity;
 
-  if (idleFor > 120000UL) return "SLEEPY";
+  if (idleFor > 120000UL || petEnergy < 14) return "SLEEPY";
 
   // Mostly curious, with occasional happy/surprised moments. Avoid abrupt sadness,
   // annoyance or love without a reason.
   const uint32_t roll = esp_random() % 100;
   String next;
-  if (idleFor > 45000UL) {
-    next = roll < 52 ? "CURIOUS" : roll < 82 ? "HAPPY" : "SLEEPY";
+  if (petEnergy < 28) {
+    next = "SLEEPY";
+  } else if (petMoodValue < 38 && idleFor > 60000UL) {
+    next = roll < 65 ? "SAD" : "CURIOUS";
+  } else if (idleFor > 45000UL) {
+    next = petCuriosity > 65 ? (roll < 60 ? "CURIOUS" : roll < 86 ? "HAPPY" : "SLEEPY") : (roll < 48 ? "CURIOUS" : roll < 78 ? "HAPPY" : "SLEEPY");
   } else {
-    next = roll < 48 ? "CURIOUS" : roll < 78 ? "HAPPY" : "SURPRISED";
+    next = petCuriosity > 70 ? (roll < 58 ? "CURIOUS" : roll < 80 ? "SURPRISED" : "HAPPY") : (roll < 48 ? "CURIOUS" : roll < 78 ? "HAPPY" : "SURPRISED");
   }
 
   if (next == current) {
@@ -826,7 +884,7 @@ void updateMicroAction() {
   if (fabsf(gazeTargetY - gazeY) < 0.18f) gazeY = gazeTargetY;
   bool gazeMoved = (fabsf(gazeX - oldX) > 0.15f || fabsf(gazeY - oldY) > 0.15f);
 
-  if (now < moodOverrideUntil || mood == "SLEEPY") {
+  if (now < moodOverrideUntil || mood == "SLEEPY" || petEnergy < 18) {
     gazeTargetX = 0.0f;
     gazeTargetY = 0.0f;
     microAction = "";
@@ -968,6 +1026,7 @@ void loop() {
     notificationMessage = "";
     drawFace();
   }
+  updatePetNeeds();
   updateAutonomousMood();
   updateMicroAction();
   sampleMicrophone();
