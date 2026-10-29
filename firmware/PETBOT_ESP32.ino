@@ -1013,7 +1013,11 @@ void updateAutonomousMood() {
       // Idle behavior has a slower rhythm. After two minutes without interaction,
       // PETBOT settles into sleep instead of endlessly changing expressions.
       if (idleFor > 120000UL) {
+        // Long inactivity: settle into sleep and let energy recover.
         next = "SLEEPY";
+      } else if (idleFor > 60000UL) {
+        // A distinct bored phase between active exploration and sleep.
+        next = petMoodValue > 30 ? "SAD" : "SLEEPY";
       } else if (idleFor < 15000UL && next == "SLEEPY") {
         next = "CURIOUS";
       }
