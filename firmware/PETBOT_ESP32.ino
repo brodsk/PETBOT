@@ -58,6 +58,8 @@ float gazeTargetY = 0.0f;
 bool eyesOpen = true;
 bool displayReady = false;
 unsigned long lastSoundSample = 0;
+unsigned long lastInteractionAt = 0;
+bool micEnabled = false; // optional input is off until a compatible sensor is wired
 unsigned long lastSoundEvent = 0;
 unsigned long nextIdleSoundAt = 0;
 unsigned long lastMoodSoundAt = 0;
@@ -104,7 +106,10 @@ void updatePetNeeds() {
   } else {
     petEnergy = max(0, petEnergy - minutes);
     if (now - lastActivity > 12000UL) petCuriosity = min(100, petCuriosity + minutes * 2);
-    if (now - lastActivity > 90000UL) petMoodValue = max(20, petMoodValue - minutes);
+    if (now - lastActivity > 90000UL) {
+      const int moodDecay = petAttachment >= 60 ? 0 : (petAttachment >= 30 ? max(0, minutes - 1) : minutes);
+      petMoodValue = max(20, petMoodValue - moodDecay);
+    }
   }
   if (now - lastNeedsSave > 60000UL) savePetNeeds();
 }
@@ -123,8 +128,6 @@ void registerPetInteraction(bool affectionate) {
   petbotPrefs.putUInt("interactions", interactionCount);
   petbotPrefs.end();
 }
-unsigned long lastInteractionAt = 0;
-
 void playRobotSound(const String& soundMood) {
   if (!soundEnabled) return;
 
@@ -282,6 +285,7 @@ void updateSoundPersonality() {
 }
 
 void sampleMicrophone() {
+  if (!micEnabled) return; // prevent floating GPIO34 from causing false interactions
   const unsigned long now = millis();
   if (now - lastSoundSample < 25) return;
   lastSoundSample = now;
@@ -638,6 +642,7 @@ void printPetbotHelp() {
   Serial.println("PET - affectionate reaction");
   Serial.println("PLAY - happy sound");
   Serial.println("SOUND:ON / SOUND:OFF");
+  Serial.println("MIC:ON / MIC:OFF - enable or disable analog sound input");
   Serial.println("MIC:THRESHOLD=240 - set sound sensitivity (50..1500)");
   Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
   Serial.println("NEEDS - show curiosity, energy, mood and attachment (C/E/M/A)");
@@ -683,6 +688,7 @@ void handleSerialProvisioning() {
     Serial.println(String("Wi-Fi connected: ") + (WiFi.status() == WL_CONNECTED ? "YES" : "NO"));
     Serial.println(String("Mood: ") + mood);
     Serial.println(String("Sound enabled: ") + (soundEnabled ? "YES" : "NO"));
+    Serial.println(String("Mic enabled: ") + (micEnabled ? "YES" : "NO"));
     Serial.println(String("Mic threshold: ") + micThreshold);
     Serial.println(String("Interactions: ") + interactionCount);
     Serial.println(String("Needs C/E/M/A: ") + petCuriosity + "/" + petEnergy + "/" + petMoodValue + "/" + petAttachment);
@@ -713,6 +719,18 @@ void handleSerialProvisioning() {
     petbotPrefs.putBool("sound", false);
     petbotPrefs.end();
     Serial.println("Sound muted.");
+  } else if (line == "MIC:ON") {
+    micEnabled = true;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("mic_enabled", true);
+    petbotPrefs.end();
+    Serial.println("Mic input enabled. Confirm sensor output is safe for GPIO34 (0-3.3V).");
+  } else if (line == "MIC:OFF") {
+    micEnabled = false;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("mic_enabled", false);
+    petbotPrefs.end();
+    Serial.println("Mic input disabled.");
   } else if (line.startsWith("MIC:THRESHOLD=")) {
     int value = line.substring(14).toInt();
     if (value >= 50 && value <= 1500) {
@@ -761,6 +779,7 @@ void setup() {
   petbotPrefs.begin("petbot", false);
   deviceToken = petbotPrefs.getString("device_token", "");
   soundEnabled = petbotPrefs.getBool("sound", true);
+  micEnabled = petbotPrefs.getBool("mic_enabled", false);
   micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
   interactionCount = petbotPrefs.getUInt("interactions", 0);
   petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
