@@ -1,11 +1,10 @@
 /*
-  PETBOT firmware v2.5
-  Board: LILYGO T3 V1.6.1 / ESP32
-  Features: expressive OLED face, autonomous moods and blinks, Wi-Fi setup,
-  cloud heartbeat and commands, token stored in ESP32 NVS.
-  Unused IR input removed; USB Serial RX remains available for provisioning.
-  Piezo-only sound effects on GPIO25 (no speech synthesis); analog sound-level input on GPIO34.
-  Motors, UV sensor and camera remain disabled.
+  PETBOT firmware v3.0.0
+  Board: LILYGO T3 V1.6.1 / classic ESP32
+  Features: local Vector-inspired behavior model, seven internal drives,
+  OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
+  Core behavior continues without Wi-Fi after a bounded provisioning attempt.
+  GPIO34 analog sound input is disabled by default. Motors and camera are not present.
 */
 
 #include <WiFi.h>
@@ -870,8 +869,8 @@ void setup() {
   WiFi.setAutoReconnect(true);
 
   WiFiManager wifiManager;
-  wifiManager.setConfigPortalTimeout(0);
-  wifiManager.setConnectTimeout(25);
+  wifiManager.setConfigPortalTimeout(30);
+  wifiManager.setConnectTimeout(8);
   wifiManager.setTitle("PETBOT Wi-Fi setup");
 
   Serial.println("Starting Wi-Fi provisioning");
@@ -893,18 +892,19 @@ void setup() {
       "PETBOT-Setup", "PETBOT-4827"
   );
 
-  if (!connected) {
-    Serial.println("Wi-Fi setup failed; restarting");
-    delay(1000);
-    ESP.restart();
+  if (connected) {
+    Serial.println("Wi-Fi connected: " + WiFi.SSID());
+    Serial.println("IP address: " + WiFi.localIP().toString());
+  } else {
+    // Do not hold the local personality hostage to network setup.
+    Serial.println("Wi-Fi unavailable; starting PETBOT in offline autonomous mode.");
+    WiFi.disconnect(true, false);
+    WiFi.mode(WIFI_STA);
   }
-
-  Serial.println("Wi-Fi connected: " + WiFi.SSID());
-  Serial.println("IP address: " + WiFi.localIP().toString());
 
   lastActivity = millis();
   lastNeedsUpdate = millis();
-  wifiWasConnected = true;
+  wifiWasConnected = (WiFi.status() == WL_CONNECTED);
 
   if (displayReady) {
     display.clearDisplay();
