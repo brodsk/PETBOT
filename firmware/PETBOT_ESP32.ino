@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-2.6";
+const char* FIRMWARE_VERSION = "petbot-3.0.0";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -74,6 +74,9 @@ int petCuriosity = 58;       // rises during quiet time; positive interaction se
 int petEnergy = 88;          // falls while awake and recovers while sleeping
 int petMoodValue = 68;        // general affect, separate from the displayed mood label
 int petAttachment = 12;      // grows gradually through positive interactions
+int petStimulation = 24;     // short-lived arousal/alertness from events
+int petSocialNeed = 32;      // rises slowly during isolation; contact relieves it
+int petConfidence = 52;      // rises with successful interactions, falls after setbacks
 unsigned long lastNeedsUpdate = 0;
 unsigned long lastNeedsSave = 0;
 
@@ -83,6 +86,9 @@ void savePetNeeds() {
   petbotPrefs.putInt("energy", petEnergy);
   petbotPrefs.putInt("mood_value", petMoodValue);
   petbotPrefs.putInt("attachment", petAttachment);
+  petbotPrefs.putInt("stimulation", petStimulation);
+  petbotPrefs.putInt("social_need", petSocialNeed);
+  petbotPrefs.putInt("confidence", petConfidence);
   petbotPrefs.end();
   lastNeedsSave = millis();
 }
@@ -99,13 +105,18 @@ void updatePetNeeds() {
   lastNeedsUpdate = now;
 
   const bool sleeping = mood == "SLEEPY" || petEnergy < 14;
+  petStimulation = max(0, petStimulation - minutes * (sleeping ? 8 : 5));
   if (sleeping) {
     petEnergy = min(100, petEnergy + minutes * 5);
     petCuriosity = max(8, petCuriosity - minutes * 2);
     petMoodValue = min(100, petMoodValue + minutes);
+    petSocialNeed = min(100, petSocialNeed + minutes);
   } else {
     petEnergy = max(0, petEnergy - minutes);
-    if (now - lastActivity > 12000UL) petCuriosity = min(100, petCuriosity + minutes * 2);
+    if (now - lastActivity > 12000UL) {
+      petCuriosity = min(100, petCuriosity + minutes * 2);
+      petSocialNeed = min(100, petSocialNeed + minutes);
+    }
     if (now - lastActivity > 90000UL) {
       const int moodDecay = petAttachment >= 60 ? 0 : (petAttachment >= 30 ? max(0, minutes - 1) : minutes);
       petMoodValue = max(20, petMoodValue - moodDecay);
@@ -122,6 +133,9 @@ void registerPetInteraction(bool affectionate) {
   petEnergy = min(100, petEnergy + 8);
   petMoodValue = min(100, petMoodValue + (affectionate ? 12 : 6));
   petCuriosity = max(10, petCuriosity - 12);
+  petStimulation = min(100, petStimulation + (affectionate ? 18 : 12));
+  petSocialNeed = max(0, petSocialNeed - (affectionate ? 22 : 10));
+  petConfidence = min(100, petConfidence + (affectionate ? 2 : 1));
   if (affectionate) petAttachment = min(100, petAttachment + (petAttachment < 60 ? 3 : 1));
   if (now - lastNeedsSave > 60000UL) savePetNeeds();
   petbotPrefs.begin("petbot", false);
@@ -645,7 +659,9 @@ void printPetbotHelp() {
   Serial.println("MIC:ON / MIC:OFF - enable or disable analog sound input");
   Serial.println("MIC:THRESHOLD=240 - set sound sensitivity (50..1500)");
   Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
-  Serial.println("NEEDS - show curiosity, energy, mood and attachment (C/E/M/A)");
+  Serial.println("NEEDS - show all internal state dimensions");
+  Serial.println("EVENT:SOUND / EVENT:SUCCESS / EVENT:FAIL - simulate sensor/outcome");
+  Serial.println("WAKE / SLEEP - test sleep and wake behavior");
 }
 
 void handleSerialProvisioning() {
@@ -692,11 +708,53 @@ void handleSerialProvisioning() {
     Serial.println(String("Mic threshold: ") + micThreshold);
     Serial.println(String("Interactions: ") + interactionCount);
     Serial.println(String("Needs C/E/M/A: ") + petCuriosity + "/" + petEnergy + "/" + petMoodValue + "/" + petAttachment);
+    Serial.println(String("Vector model S/S/C: ") + petStimulation + "/" + petSocialNeed + "/" + petConfidence);
     Serial.println(String("Free heap: ") + ESP.getFreeHeap());
   } else if (line == "HELP") {
     printPetbotHelp();
   } else if (line == "NEEDS") {
-    Serial.printf("PETBOT needs: curiosity=%d energy=%d mood=%d attachment=%d interactions=%lu\\n", petCuriosity, petEnergy, petMoodValue, petAttachment, (unsigned long)interactionCount);
+    Serial.printf("PETBOT state: curiosity=%d energy=%d mood=%d attachment=%d stimulation=%d social_need=%d confidence=%d interactions=%lu\\n", petCuriosity, petEnergy, petMoodValue, petAttachment, petStimulation, petSocialNeed, petConfidence, (unsigned long)interactionCount);
+  } else if (line == "EVENT:SOUND") {
+    petStimulation = min(100, petStimulation + 28);
+    petConfidence = max(0, petConfidence - 1);
+    lastActivity = millis();
+    mood = "SURPRISED";
+    moodOverrideUntil = millis() + 2200UL;
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    gazeTargetX = (esp_random() & 1) ? -5.0f : 5.0f;
+    microAction = "WIDE_EYES";
+    microActionUntil = millis() + 650UL;
+    playRobotSound("SURPRISED");
+    drawFace();
+    Serial.println("Test event: sudden sound");
+  } else if (line == "EVENT:SUCCESS") {
+    petConfidence = min(100, petConfidence + 8);
+    petMoodValue = min(100, petMoodValue + 4);
+    petStimulation = max(0, petStimulation - 5);
+    if (millis() - lastNeedsSave > 60000UL) savePetNeeds();
+    Serial.println("Test outcome: confidence increased.");
+  } else if (line == "EVENT:FAIL") {
+    petConfidence = max(0, petConfidence - 8);
+    petMoodValue = max(0, petMoodValue - 4);
+    petStimulation = min(100, petStimulation + 10);
+    if (millis() - lastNeedsSave > 60000UL) savePetNeeds();
+    Serial.println("Test outcome: confidence decreased.");
+  } else if (line == "WAKE") {
+    registerPetInteraction(false);
+    mood = "SURPRISED";
+    moodOverrideUntil = millis() + 2500UL;
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    eyesOpen = true;
+    playRobotSound("SURPRISED");
+    drawFace();
+    Serial.println("PETBOT woke up.");
+  } else if (line == "SLEEP") {
+    mood = "SLEEPY";
+    moodOverrideUntil = millis() + 5000UL;
+    eyesOpen = false;
+    playRobotSound("SLEEPY");
+    drawFace();
+    Serial.println("PETBOT entering sleep.");
   } else if (line == "PET") {
     registerPetInteraction(true);
     mood = "LOVE";
@@ -786,6 +844,9 @@ void setup() {
   petEnergy = constrain(petbotPrefs.getInt("energy", 88), 0, 100);
   petMoodValue = constrain(petbotPrefs.getInt("mood_value", 68), 0, 100);
   petAttachment = constrain(petbotPrefs.getInt("attachment", 12), 0, 100);
+  petStimulation = constrain(petbotPrefs.getInt("stimulation", 24), 0, 100);
+  petSocialNeed = constrain(petbotPrefs.getInt("social_need", 32), 0, 100);
+  petConfidence = constrain(petbotPrefs.getInt("confidence", 52), 0, 100);
   petbotPrefs.end();
 
   Serial.println(
@@ -863,30 +924,25 @@ void setup() {
 }
 
 String chooseAutonomousMood(const String& current) {
-  // PETBOT should feel curious and warm, not like a slot machine of random emotions.
-  // Sleep is driven by inactivity; LOVE and ANNOYED are reserved for meaningful events.
+  // A compact Vector-inspired state policy: internal drives bias actions;
+  // random variation is only used to avoid robotic repetition.
   const unsigned long idleFor = millis() - lastActivity;
-
-  if (idleFor > 120000UL || petEnergy < 14) return "SLEEPY";
-
-  // Mostly curious, with occasional happy/surprised moments. Avoid abrupt sadness,
-  // annoyance or love without a reason.
+  if (petEnergy < 14 || idleFor > 120000UL) return "SLEEPY";
   const uint32_t roll = esp_random() % 100;
-  String next;
-  if (petEnergy < 28) {
-    next = "SLEEPY";
-  } else if (petMoodValue < 38 && idleFor > 60000UL) {
-    next = roll < 65 ? "SAD" : "CURIOUS";
-  } else if (idleFor > 45000UL) {
-    next = petCuriosity > 65 ? (roll < 60 ? "CURIOUS" : roll < 86 ? "HAPPY" : "SLEEPY") : (roll < 48 ? "CURIOUS" : roll < 78 ? "HAPPY" : "SLEEPY");
-  } else {
-    next = petCuriosity > 70 ? (roll < 58 ? "CURIOUS" : roll < 80 ? "SURPRISED" : "HAPPY") : (roll < 48 ? "CURIOUS" : roll < 78 ? "HAPPY" : "SURPRISED");
-  }
 
-  if (next == current) {
-    if (current == "CURIOUS") next = roll < 65 ? "HAPPY" : "SURPRISED";
-    else next = "CURIOUS";
+  if (petStimulation >= 72) return roll < 72 ? "SURPRISED" : "CURIOUS";
+  if (petSocialNeed >= 78 && idleFor > 45000UL) {
+    if (petAttachment >= 35 && petMoodValue >= 35) return roll < 62 ? "LOVE" : "SAD";
+    return roll < 72 ? "SAD" : "CURIOUS";
   }
+  if (petEnergy < 28) return "SLEEPY";
+  if (petConfidence < 24 && petStimulation >= 35) return roll < 60 ? "ANNOYED" : "CURIOUS";
+  if (petMoodValue < 30 && idleFor > 60000UL) return roll < 65 ? "SAD" : "CURIOUS";
+  if (petCuriosity >= 68) return roll < 58 ? "CURIOUS" : roll < 82 ? "SURPRISED" : "HAPPY";
+  if (petMoodValue >= 72 && petSocialNeed < 55) return roll < 55 ? "HAPPY" : "CURIOUS";
+
+  String next = roll < 48 ? "CURIOUS" : roll < 78 ? "HAPPY" : "SURPRISED";
+  if (next == current) next = current == "CURIOUS" ? "HAPPY" : "CURIOUS";
   return next;
 }
 
