@@ -943,7 +943,11 @@
       }
     });
 
-    cameraToggle.addEventListener('click', async () => {
+    // Delegate camera clicks: the button is moved into the call toolbar during layout construction.
+    document.addEventListener('click', async (event) => {
+      const clickedCameraButton = event.target && event.target.closest ? event.target.closest('#camera-toggle') : null;
+      if (!clickedCameraButton) return;
+      event.preventDefault();
       // Toggle the actual browser MediaStream. Face detection is optional and must never block video.
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
@@ -971,8 +975,8 @@
         return;
       }
 
-      cameraToggle.disabled = true;
-      cameraStatus.textContent = 'Запрашиваю разрешение на камеру…';
+      clickedCameraButton.disabled = true;
+      cameraStatus.textContent = 'Нажатие получено. Запрашиваю разрешение на камеру…';
       try {
         let stream;
         try {
@@ -994,8 +998,8 @@
         cameraPreview.style.visibility = 'visible';
         await cameraPreview.play();
 
-        cameraToggle.textContent = '▣ Выключить видео';
-        cameraToggle.setAttribute('aria-pressed', 'true');
+        clickedCameraButton.textContent = '▣ Выключить видео';
+        clickedCameraButton.setAttribute('aria-pressed', 'true');
         cameraAsk.disabled = false;
         cameraStatus.textContent = 'Видео включено. PETBOT наблюдает за сценой и реагирует на заметные изменения.';
 
@@ -1034,8 +1038,8 @@
         cameraPreview.pause();
         cameraPreview.srcObject = null;
         cameraPreview.style.display = 'none';
-        cameraToggle.textContent = '▣ Видео';
-        cameraToggle.setAttribute('aria-pressed', 'false');
+        clickedCameraButton.textContent = '▣ Видео';
+        clickedCameraButton.setAttribute('aria-pressed', 'false');
         const reason = error && error.name === 'NotAllowedError'
           ? 'Браузер запретил доступ. Разреши камеру в настройках сайта и нажми снова.'
           : error && error.name === 'NotFoundError'
@@ -1045,9 +1049,9 @@
               : 'Не удалось включить видео: ' + (error && error.message ? error.message : 'неизвестная ошибка');
         cameraStatus.textContent = reason;
       } finally {
-        cameraToggle.disabled = false;
+        clickedCameraButton.disabled = false;
       }
-    });
+    }, true);
 
     // Speech output is opt-in: responses are spoken only while voice mode is on.
     const originalAddBubble = addBubble;
