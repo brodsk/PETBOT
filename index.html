@@ -818,11 +818,44 @@
     }
 
 
+    let lastVisionReactionAt = 0;
+
+    async function reactToVisualEvent(eventText, description) {
+      const now = Date.now();
+      if (now - lastVisionReactionAt < 30000) return;
+      lastVisionReactionAt = now;
+      const observation = "Ты только что заметил через камеру важное событие: " +
+        String(eventText || description || "сцена заметно изменилась").slice(0, 240) +
+        ". Что-нибудь коротко и естественно скажи об этом, как живой робот-компаньон. Не выдумывай деталей.";
+      const messages = history.slice(-9).concat([{ role: "user", content: observation }]);
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ messages })
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok || data.ok !== true || !data.reply) {
+          throw new Error(data.error || "Не удалось сформировать реакцию PETBOT.");
+        }
+        history.push({ role: "user", content: observation }, { role: "assistant", content: data.reply });
+        while (history.length > 10) history.shift();
+        saveHistory();
+        addBubble('assistant', data.reply);
+        const replyMood = moodFromEmoji(data.reply) || data.mood;
+        if (replyMood) updateMoodDisplay(replyMood);
+        cameraStatus.textContent = "PETBOT заметил изменение и отреагировал.";
+      } catch (error) {
+        lastVisionReactionAt = 0;
+        cameraStatus.textContent = error.message || "Не удалось отреагировать на событие.";
+      }
+    }
+
     async function analyzeCameraFrame() {
       const now = Date.now();
       if (!cameraStream || cameraPreview.readyState < 2 || visionBusy || now < visionBackoffUntil) return;
       // Observe sparingly; never turn a camera frame into an unsolicited chat message.
-      if (now - lastVisionScanAt < 45000) return;
+      if (now - lastVisionScanAt < 20000) return;
       lastVisionScanAt = now;
       visionBusy = true;
       try {
@@ -851,8 +884,11 @@
         latestVisionContext = description;
         if (description && description !== lastVisionDescription) lastVisionDescription = description;
         cameraStatus.textContent = data.important_change === true
-          ? 'Важное изменение: ' + String(data.event || description).slice(0, 150) + '. Сохранено в памяти.'
-          : 'Камера наблюдает тихо. Существенных изменений нет — не отвлекаю.';
+          ? 'Важное изменение: ' + String(data.event || description).slice(0, 150) + '. PETBOT реагирует…'
+          : 'Камера наблюдает. Существенных изменений пока нет.';
+        if (data.important_change === true) {
+          await reactToVisualEvent(data.event || description, description);
+        }
         lastVisionErrorAt = 0;
       } catch (error) {
         if (Date.now() - lastVisionErrorAt > 20000) {
@@ -950,7 +986,7 @@
         cameraToggle.textContent = '▣ Выключить видео';
         cameraToggle.setAttribute('aria-pressed', 'true');
         cameraAsk.disabled = false;
-        cameraStatus.textContent = 'Видео включено. PETBOT получает кадр только вместе с твоим сообщением.';
+        cameraStatus.textContent = 'Видео включено. PETBOT наблюдает за сценой и реагирует на заметные изменения.';
 
         // Scene observation is a separate enhancement; failure here must not turn video off.
         try {
@@ -973,8 +1009,8 @@
           faceDetector = await window.visionTasksPromise;
           if (!cameraStream) return;
           faceTimer = setInterval(scanForFace, 700);
-          visionTimer = setInterval(analyzeCameraFrame, 45000);
-          setTimeout(analyzeCameraFrame, 8000);
+          visionTimer = setInterval(analyzeCameraFrame, 20000);
+          setTimeout(analyzeCameraFrame, 2500);
         } catch (error) {
           faceDetector = null;
           cameraStatus.textContent = 'Видео включено. Дополнительное распознавание сцены не загрузилось, но кадр можно отправить сообщением.';
