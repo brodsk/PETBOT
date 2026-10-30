@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v3.0.0
+  PETBOT firmware v3.2.0
   Board: LILYGO T3 V1.6.1 / classic ESP32
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
@@ -17,7 +17,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.0.0";
+const char* FIRMWARE_VERSION = "petbot-3.2.0";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -141,97 +141,155 @@ void registerPetInteraction(bool affectionate) {
   petbotPrefs.putUInt("interactions", interactionCount);
   petbotPrefs.end();
 }
-void playRobotSound(const String& soundMood) {
-  if (!soundEnabled) return;
+// ---------------------------------------------------------------------------
+// PETBOT voice: Vector-style non-verbal vocalizations on a passive piezo.
+// Instead of fixed beeps, a phrase is a chain of gliding / vibrato / purr /
+// trill segments, built fresh each time with random variation and coloured by
+// the internal drives (tired = slower and lower, excited = quicker and higher,
+// attached = longer purrs). It runs in its own FreeRTOS task, so the OLED
+// face, Wi-Fi polling and blinking are never blocked while PETBOT "talks".
+// ---------------------------------------------------------------------------
+enum VoiceMod : uint8_t { VM_GLIDE, VM_VIBRATO, VM_PURR, VM_TRILL, VM_REST };
+struct VoiceSeg { uint16_t f0; uint16_t f1; uint16_t ms; uint8_t mod; };
+#define VOICE_MAX_SEGS 12
+// Request byte: low 7 bits = mood code (1..8), bit 7 = low-priority idle murmur.
+volatile uint8_t voiceRequest = 0;
+VoiceSeg voiceSegs[VOICE_MAX_SEGS];  // touched only by the voice task
+uint8_t voiceLen = 0;
 
-  // Each emotion has a small family of non-verbal motifs, so reactions feel
-  // less like one repeated notification tone. No speech or voice synthesis.
-  const uint32_t variant = esp_random() % 3;
+uint8_t voiceCodeForMood(const String& m) {
+  if (m == "HAPPY") return 1;
+  if (m == "CURIOUS") return 2;
+  if (m == "SURPRISED") return 3;
+  if (m == "LOVE") return 4;
+  if (m == "ANNOYED") return 5;
+  if (m == "SLEEPY") return 6;
+  if (m == "SAD") return 7;
+  return 8;
+}
 
-  if (soundMood == "HAPPY") {
-    if (variant == 0) {
-      tone(PETBOT_PIEZO_PIN, 1450, 55); delay(65);
-      tone(PETBOT_PIEZO_PIN, 1850, 65); delay(65);
-      tone(PETBOT_PIEZO_PIN, 2250, 85);
-    } else if (variant == 1) {
-      tone(PETBOT_PIEZO_PIN, 1950, 65); delay(70);
-      tone(PETBOT_PIEZO_PIN, 1550, 45); delay(55);
-      tone(PETBOT_PIEZO_PIN, 2150, 75);
-    } else {
-      tone(PETBOT_PIEZO_PIN, 1650, 45); delay(55);
-      tone(PETBOT_PIEZO_PIN, 2200, 95);
-    }
-  } else if (soundMood == "CURIOUS") {
-    if (variant == 0) {
-      tone(PETBOT_PIEZO_PIN, 900, 65); delay(85);
-      tone(PETBOT_PIEZO_PIN, 1450, 75);
-    } else if (variant == 1) {
-      tone(PETBOT_PIEZO_PIN, 1250, 45); delay(60);
-      tone(PETBOT_PIEZO_PIN, 1050, 45); delay(60);
-      tone(PETBOT_PIEZO_PIN, 1600, 80);
-    } else {
-      tone(PETBOT_PIEZO_PIN, 1100, 55); delay(90);
-      tone(PETBOT_PIEZO_PIN, 1750, 60);
-    }
-  } else if (soundMood == "SURPRISED") {
-    if (variant == 0) tone(PETBOT_PIEZO_PIN, 2350, 115);
-    else if (variant == 1) {
-      tone(PETBOT_PIEZO_PIN, 1850, 50); delay(45);
-      tone(PETBOT_PIEZO_PIN, 2450, 90);
-    } else {
-      tone(PETBOT_PIEZO_PIN, 2200, 70); delay(65);
-      tone(PETBOT_PIEZO_PIN, 1750, 60);
-    }
-  } else if (soundMood == "LOVE") {
-    if (variant == 0) {
-      tone(PETBOT_PIEZO_PIN, 1550, 65); delay(75);
-      tone(PETBOT_PIEZO_PIN, 1850, 65); delay(75);
-      tone(PETBOT_PIEZO_PIN, 2250, 95);
-    } else if (variant == 1) {
-      tone(PETBOT_PIEZO_PIN, 1800, 55); delay(65);
-      tone(PETBOT_PIEZO_PIN, 2100, 55); delay(65);
-      tone(PETBOT_PIEZO_PIN, 1800, 80);
-    } else {
-      tone(PETBOT_PIEZO_PIN, 1650, 50); delay(55);
-      tone(PETBOT_PIEZO_PIN, 2050, 70);
-    }
-  } else if (soundMood == "ANNOYED") {
-    if (variant == 0) {
-      tone(PETBOT_PIEZO_PIN, 390, 85); delay(95);
-      tone(PETBOT_PIEZO_PIN, 290, 115);
-    } else if (variant == 1) {
-      tone(PETBOT_PIEZO_PIN, 520, 55); delay(45);
-      tone(PETBOT_PIEZO_PIN, 340, 100); delay(55);
-      tone(PETBOT_PIEZO_PIN, 270, 80);
-    } else {
-      tone(PETBOT_PIEZO_PIN, 430, 75); delay(70);
-      tone(PETBOT_PIEZO_PIN, 320, 90);
-    }
-  } else if (soundMood == "SLEEPY") {
-    if (variant == 0) {
-      tone(PETBOT_PIEZO_PIN, 650, 150); delay(165);
-      tone(PETBOT_PIEZO_PIN, 450, 190);
-    } else if (variant == 1) {
-      tone(PETBOT_PIEZO_PIN, 560, 210);
-    } else {
-      tone(PETBOT_PIEZO_PIN, 720, 90); delay(120);
-      tone(PETBOT_PIEZO_PIN, 480, 170);
-    }
-  } else if (soundMood == "SAD") {
-    if (variant == 0) {
-      tone(PETBOT_PIEZO_PIN, 760, 105); delay(125);
-      tone(PETBOT_PIEZO_PIN, 500, 175);
-    } else if (variant == 1) {
-      tone(PETBOT_PIEZO_PIN, 620, 150); delay(100);
-      tone(PETBOT_PIEZO_PIN, 460, 110);
-    } else {
-      tone(PETBOT_PIEZO_PIN, 700, 75); delay(120);
-      tone(PETBOT_PIEZO_PIN, 530, 160);
-    }
-  } else {
-    tone(PETBOT_PIEZO_PIN, 1200, 55);
+// base +/- pct percent
+static uint16_t vj(uint16_t base, uint8_t pct) {
+  const int d = (int)base * pct / 100;
+  return (uint16_t)((int)base + (int)(esp_random() % (2 * d + 1)) - d);
+}
+
+static void vAdd(uint16_t f0, uint16_t f1, uint16_t ms, uint8_t mod) {
+  if (voiceLen >= VOICE_MAX_SEGS) return;
+  float tempo = 1.0f, pitch = 1.0f;
+  if (petEnergy < 25) { tempo = 1.35f; pitch = 0.88f; }
+  else if (petStimulation > 65) { tempo = 0.85f; pitch = 1.08f; }
+  if (mod != VM_REST) {
+    f0 = (uint16_t)max(300.0f, min(4200.0f, f0 * pitch));
+    f1 = (uint16_t)max(300.0f, min(4200.0f, f1 * pitch));
   }
+  voiceSegs[voiceLen++] = {f0, f1, (uint16_t)(ms * tempo), mod};
+}
+static void vRest(uint16_t ms) { vAdd(0, 0, ms, VM_REST); }
 
+static void buildVoice(uint8_t code, bool idle) {
+  voiceLen = 0;
+  const uint32_t r = esp_random() % 3;
+  switch (code) {
+    case 1:  // HAPPY: bright rising chirps, ends in a bird-like trill
+      if (idle) { vAdd(vj(1500, 10), vj(2100, 10), 70, VM_GLIDE); break; }
+      if (r == 0) { vAdd(1300, 2300, 90, VM_GLIDE); vRest(35); vAdd(1700, 2700, 80, VM_GLIDE); vAdd(2400, 2400, 130, VM_TRILL); }
+      else if (r == 1) { vAdd(1600, 2400, 70, VM_GLIDE); vAdd(2400, 1500, 110, VM_VIBRATO); vRest(30); vAdd(1500, 2500, 100, VM_GLIDE); }
+      else { vAdd(1400, 2000, 60, VM_GLIDE); vRest(25); vAdd(1400, 2000, 60, VM_GLIDE); vRest(25); vAdd(1800, 2800, 120, VM_TRILL); }
+      break;
+    case 2:  // CURIOUS: question-like upward glides and wobbles
+      if (idle) { vAdd(vj(1000, 15), vj(1500, 15), 90, VM_GLIDE); break; }
+      if (r == 0) { vAdd(900, 1500, 150, VM_GLIDE); vRest(60); vAdd(1500, 1700, 130, VM_VIBRATO); }
+      else if (r == 1) { vAdd(1200, 1000, 60, VM_GLIDE); vRest(40); vAdd(1000, 1800, 160, VM_GLIDE); vAdd(1800, 1800, 90, VM_TRILL); }
+      else { vAdd(1100, 1700, 110, VM_VIBRATO); vRest(50); vAdd(1300, 1900, 90, VM_GLIDE); }
+      break;
+    case 3:  // SURPRISED: quick squeak, then a wobbly fall
+      vAdd(1400, 2900, 60, VM_GLIDE);
+      vAdd(2900, 1800, 130, VM_VIBRATO);
+      if (r == 2) { vRest(40); vAdd(1500, 2200, 70, VM_GLIDE); }
+      break;
+    case 4: {  // LOVE: a coo and a purr; the more attached, the longer it purrs
+      const uint16_t purrMs = (uint16_t)(450 + min(100, max(0, petAttachment)) * 5);
+      if (idle) { vAdd(1200, 1500, 150, VM_VIBRATO); vAdd(1100, 900, purrMs / 2, VM_PURR); break; }
+      vAdd(1100, 1700, 140, VM_GLIDE);
+      vAdd(1100, 900, purrMs, VM_PURR);
+      vAdd(1700, 1300, 200, VM_VIBRATO);
+      break;
+    }
+    case 5:  // ANNOYED: low grumble, then a disapproving drop
+      if (idle) { vAdd(600, 450, 180, VM_PURR); break; }
+      vAdd(700, 500, 260, VM_PURR);
+      vRest(50);
+      vAdd(520, 320, 140, VM_GLIDE);
+      if (r == 2) { vRest(40); vAdd(450, 450, 200, VM_PURR); }
+      break;
+    case 6:  // SLEEPY: a yawn; when idle, a soft snore
+      if (idle) { vAdd(700, 520, 320, VM_PURR); break; }
+      vAdd(1200, 1500, 200, VM_VIBRATO);
+      vAdd(1500, 500, 520, VM_VIBRATO);
+      break;
+    case 7:  // SAD: slow descending whimper
+      vAdd(1300, 800, idle ? 260 : 420, VM_VIBRATO);
+      if (!idle) { vRest(90); vAdd(1000, 520, 380, VM_VIBRATO); }
+      break;
+    default:
+      vAdd(1200, 1200, 55, VM_GLIDE);
+  }
+}
+
+// Returns true if the phrase was interrupted by a newer request.
+static bool playVoiceSegs(bool idle) {
+  unsigned int lastF = 0;
+  for (uint8_t i = 0; i < voiceLen; i++) {
+    const VoiceSeg s = voiceSegs[i];
+    const uint32_t t0 = millis();
+    uint32_t t;
+    if (s.mod == VM_REST) { noTone(PETBOT_PIEZO_PIN); lastF = 0; }
+    while ((t = millis() - t0) < s.ms) {
+      if (!soundEnabled) { noTone(PETBOT_PIEZO_PIN); return true; }
+      const uint8_t req = voiceRequest;
+      if (req) {
+        // A real reaction interrupts anything; an idle murmur never interrupts a reaction.
+        if (idle || !(req & 0x80)) { noTone(PETBOT_PIEZO_PIN); return true; }
+        voiceRequest = 0;
+      }
+      if (s.mod != VM_REST) {
+        float f = (float)s.f0 + ((float)s.f1 - (float)s.f0) * ((float)t / (float)s.ms);
+        if (s.mod == VM_VIBRATO) f *= 1.0f + 0.045f * sinf((float)t * 0.0408f);  // ~6.5 Hz wobble
+        else if (s.mod == VM_PURR) f *= ((t / 18) & 1) ? 0.90f : 1.0f;            // ~28 Hz flutter = purr
+        else if (s.mod == VM_TRILL) f *= ((t / 32) & 1) ? 1.20f : 1.0f;           // ~15 Hz warble
+        const unsigned int fi = (unsigned int)f;
+        if (fi != lastF) { tone(PETBOT_PIEZO_PIN, fi); lastF = fi; }
+      }
+      delay(5);
+    }
+  }
+  noTone(PETBOT_PIEZO_PIN);
+  return false;
+}
+
+void voiceTask(void*) {
+  for (;;) {
+    const uint8_t req = voiceRequest;
+    if (!req) { delay(10); continue; }
+    voiceRequest = 0;
+    if (!soundEnabled) continue;
+    const bool idle = (req & 0x80) != 0;
+    buildVoice(req & 0x7F, idle);
+    playVoiceSegs(idle);  // if interrupted, the newer request is picked up next loop
+  }
+}
+
+void requestVoice(const String& m, bool idle) {
+  if (!soundEnabled) return;
+  const uint8_t code = voiceCodeForMood(m);
+  // never let an idle murmur overwrite a pending real reaction
+  if (idle && voiceRequest && !(voiceRequest & 0x80)) return;
+  voiceRequest = code | (idle ? 0x80 : 0);
+}
+
+void playRobotSound(const String& soundMood) {
+  requestVoice(soundMood, false);
   lastMoodSoundAt = millis();
 }
 
@@ -243,38 +301,13 @@ void scheduleNextIdleSound() {
     nextIdleSoundAt = millis() + 25000UL + (esp_random() % 30000UL);
   } else {
     // Leave quiet gaps between spontaneous sounds; event reactions remain immediate.
-    nextIdleSoundAt = millis() + 12000UL + (esp_random() % 16000UL);
+    nextIdleSoundAt = millis() + 9000UL + (esp_random() % 13000UL);
   }
 }
 
 void playIdleSound() {
-  // Keep idle sounds brief and vary them by personality.
-  const uint32_t variant = esp_random() % 4;
-  if (mood == "SLEEPY") {
-    if (variant == 0) tone(PETBOT_PIEZO_PIN, 520, 100);
-    else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 700, 70); delay(90); tone(PETBOT_PIEZO_PIN, 560, 110); }
-    else tone(PETBOT_PIEZO_PIN, 620, 65);
-  } else if (mood == "ANNOYED") {
-    if (variant == 0) tone(PETBOT_PIEZO_PIN, 380, 85);
-    else { tone(PETBOT_PIEZO_PIN, 800, 45); delay(65); tone(PETBOT_PIEZO_PIN, 420, 90); }
-  } else if (mood == "LOVE" || mood == "HAPPY") {
-    if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1450, 55); delay(70); tone(PETBOT_PIEZO_PIN, 1850, 75); }
-    else if (variant == 1) tone(PETBOT_PIEZO_PIN, 2050, 55);
-    else { tone(PETBOT_PIEZO_PIN, 1700, 45); delay(55); tone(PETBOT_PIEZO_PIN, 2200, 65); }
-  } else if (mood == "SAD") {
-    if (variant == 0) { tone(PETBOT_PIEZO_PIN, 700, 80); delay(95); tone(PETBOT_PIEZO_PIN, 520, 120); }
-    else if (variant == 1) tone(PETBOT_PIEZO_PIN, 580, 100);
-    else { tone(PETBOT_PIEZO_PIN, 620, 70); delay(85); tone(PETBOT_PIEZO_PIN, 490, 105); }
-  } else if (mood == "SURPRISED") {
-    if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1750, 45); delay(60); tone(PETBOT_PIEZO_PIN, 2250, 90); }
-    else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 2200, 70); delay(75); tone(PETBOT_PIEZO_PIN, 1650, 55); }
-    else tone(PETBOT_PIEZO_PIN, 1950, 75);
-  } else {
-    if (variant == 0) { tone(PETBOT_PIEZO_PIN, 1250, 45); delay(65); tone(PETBOT_PIEZO_PIN, 1650, 55); }
-    else if (variant == 1) { tone(PETBOT_PIEZO_PIN, 1900, 45); delay(55); tone(PETBOT_PIEZO_PIN, 1450, 60); }
-    else if (variant == 2) tone(PETBOT_PIEZO_PIN, 1050, 70);
-    else { tone(PETBOT_PIEZO_PIN, 1550, 40); delay(55); tone(PETBOT_PIEZO_PIN, 2000, 45); delay(60); tone(PETBOT_PIEZO_PIN, 1750, 55); }
-  }
+  // Short murmurs; the voice engine picks a phrase that fits the current mood.
+  requestVoice(mood, true);
 }
 
 void updateSoundPersonality() {
@@ -327,7 +360,7 @@ void sampleMicrophone() {
     microActionUntil = now + 650UL;
     drawFace();
     playRobotSound("SURPRISED");
-    Serial.printf("PETBOT sound: adc=%d baseline=%d delta=%d envelope=%d\\n",
+    Serial.printf("PETBOT sound: adc=%d baseline=%d delta=%d envelope=%d\n",
                   sample, micBaseline, deviation, soundEnvelope);
   }
 }
@@ -343,13 +376,17 @@ String jsonStringField(const String& json, const String& key) {
   int colon = json.indexOf(':', keyAt + needle.length());
   if (colon < 0) return "";
 
-  int firstQuote = json.indexOf('"', colon + 1);
-  if (firstQuote < 0) return "";
+  // The value must start right after the colon. Without this check
+  // "command":null made the parser grab the NEXT key ("poll_after_ms")
+  // and every idle poll looked like user activity.
+  int valueAt = colon + 1;
+  while (valueAt < (int)json.length() && json[valueAt] == ' ') valueAt++;
+  if (valueAt >= (int)json.length() || json[valueAt] != '"') return "";
 
-  int endQuote = json.indexOf('"', firstQuote + 1);
+  int endQuote = json.indexOf('"', valueAt + 1);
   if (endQuote < 0) return "";
 
-  return json.substring(firstQuote + 1, endQuote);
+  return json.substring(valueAt + 1, endQuote);
 }
 
 void drawFace() {
@@ -535,7 +572,14 @@ void sendHeartbeat() {
       ",\"free_heap\":" + String(ESP.getFreeHeap()) +
       ",\"ip\":\"" + WiFi.localIP().toString() +
       "\",\"mood\":\"" + mood +
-      "\",\"autonomy\":true,\"battery_mv\":null,"
+      "\",\"drives\":{\"curiosity\":" + String(petCuriosity) +
+      ",\"energy\":" + String(petEnergy) +
+      ",\"mood_value\":" + String(petMoodValue) +
+      ",\"attachment\":" + String(petAttachment) +
+      ",\"stimulation\":" + String(petStimulation) +
+      ",\"social_need\":" + String(petSocialNeed) +
+      ",\"confidence\":" + String(petConfidence) +
+      "},\"autonomy\":true,\"battery_mv\":null,"
       "\"uv_sensor_connected\":false,"
       "\"camera_connected\":false,"
       "\"motors_enabled\":false}";
@@ -544,6 +588,45 @@ void sendHeartbeat() {
           "/api/device/heartbeat", "POST", body, nullptr)) {
     Serial.println("PETBOT heartbeat OK");
   }
+}
+
+// A chat reply from the cloud brain: the face is the robot's own emotion, the
+// impulse tells the local drive model how the conversation affected it.
+void applyChatEvent(String face, String impulse, bool faceAlreadyApplied) {
+  face.toUpperCase();
+  impulse.toUpperCase();
+
+  if (impulse == "AFFECTION") {
+    registerPetInteraction(true);
+  } else if (impulse == "PRAISE") {
+    registerPetInteraction(false);
+    petConfidence = min(100, petConfidence + 6);
+    petMoodValue = min(100, petMoodValue + 4);
+  } else if (impulse == "SCOLD") {
+    lastActivity = millis();
+    petConfidence = max(0, petConfidence - 6);
+    petMoodValue = max(0, petMoodValue - 8);
+    petStimulation = min(100, petStimulation + 10);
+    petSocialNeed = max(0, petSocialNeed - 6);
+  } else {
+    registerPetInteraction(false);  // plain conversation is still social contact
+  }
+
+  const bool validFace =
+      face == "HAPPY" || face == "CURIOUS" || face == "SLEEPY" ||
+      face == "SURPRISED" || face == "ANNOYED" || face == "LOVE" ||
+      face == "SAD";
+  if (validFace) {
+    mood = face;
+    lastCloudMood = face;
+    if (!faceAlreadyApplied) playRobotSound(mood);
+    moodOverrideUntil = millis() + 12000UL;
+    lastActivity = millis();
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    drawFace();
+  }
+  if (millis() - lastNeedsSave > 60000UL) savePetNeeds();
+  Serial.println("Chat event: " + face + " / " + impulse);
 }
 
 void pollCloud() {
@@ -569,7 +652,9 @@ void pollCloud() {
       receivedMood == "LOVE" ||
       receivedMood == "SAD";
 
+  bool moodAppliedNow = false;
   if (validMood && receivedMood != lastCloudMood) {
+    moodAppliedNow = true;
     lastCloudMood = receivedMood;
     mood = receivedMood;
     playRobotSound(mood);
@@ -583,6 +668,12 @@ void pollCloud() {
 
   String command = jsonStringField(response, "command");
   command.toUpperCase();
+
+  if (command == "CHAT_EVENT") {
+    applyChatEvent(jsonStringField(response, "face"),
+                   jsonStringField(response, "impulse"), moodAppliedNow);
+    return;
+  }
 
   // Also accept direct expression commands from the admin/chat backend.
   if (command == "HAPPY" || command == "CURIOUS" ||
@@ -655,6 +746,7 @@ void printPetbotHelp() {
   Serial.println("PET - affectionate reaction");
   Serial.println("PLAY - happy sound");
   Serial.println("SOUND:ON / SOUND:OFF");
+  Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD / PURR - test voice phrases");
   Serial.println("MIC:ON / MIC:OFF - enable or disable analog sound input");
   Serial.println("MIC:THRESHOLD=240 - set sound sensitivity (50..1500)");
   Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
@@ -712,7 +804,7 @@ void handleSerialProvisioning() {
   } else if (line == "HELP") {
     printPetbotHelp();
   } else if (line == "NEEDS") {
-    Serial.printf("PETBOT state: curiosity=%d energy=%d mood=%d attachment=%d stimulation=%d social_need=%d confidence=%d interactions=%lu\\n", petCuriosity, petEnergy, petMoodValue, petAttachment, petStimulation, petSocialNeed, petConfidence, (unsigned long)interactionCount);
+    Serial.printf("PETBOT state: curiosity=%d energy=%d mood=%d attachment=%d stimulation=%d social_need=%d confidence=%d interactions=%lu\n", petCuriosity, petEnergy, petMoodValue, petAttachment, petStimulation, petSocialNeed, petConfidence, (unsigned long)interactionCount);
   } else if (line == "EVENT:SOUND") {
     petStimulation = min(100, petStimulation + 28);
     petConfidence = max(0, petConfidence - 1);
@@ -764,6 +856,13 @@ void handleSerialProvisioning() {
     Serial.println("PETBOT: happy to see you!");
   } else if (line == "PLAY") {
     playRobotSound("HAPPY");
+  } else if (line.startsWith("VOICE:")) {
+    String m = line.substring(6);
+    m.toUpperCase();
+    requestVoice(m, false);
+    Serial.println("Voice test: " + m);
+  } else if (line == "PURR") {
+    requestVoice("LOVE", false);
   } else if (line == "SOUND:ON") {
     soundEnabled = true;
     petbotPrefs.begin("petbot", false);
@@ -820,7 +919,7 @@ void handleSerialProvisioning() {
     petbotPrefs.begin("petbot", false);
     petbotPrefs.putInt("mic_threshold", micThreshold);
     petbotPrefs.end();
-    Serial.printf("Mic calibrated: baseline=%d noise-span=%d threshold=%d\\n", micBaseline, noiseSpan, micThreshold);
+    Serial.printf("Mic calibrated: baseline=%d noise-span=%d threshold=%d\n", micBaseline, noiseSpan, micThreshold);
   } else if (line.length()) {
     Serial.println("Unknown command. Type HELP.");
   }
@@ -829,6 +928,7 @@ void handleSerialProvisioning() {
 void setup() {
   Serial.begin(115200);
   pinMode(PETBOT_PIEZO_PIN, OUTPUT);
+  xTaskCreatePinnedToCore(voiceTask, "petbot_voice", 4096, NULL, 1, NULL, 0);
   pinMode(PETBOT_MIC_PIN, INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(PETBOT_MIC_PIN, ADC_11db);
@@ -1006,24 +1106,12 @@ void updateMicroAction() {
 
       // Action-specific chirps make the sound feel tied to what the face is doing.
       if (soundEnabled && (esp_random() % 100) < 38 && now - lastMoodSoundAt > 6500UL) {
-        if (microAction == "EXCITED") {
-          tone(PETBOT_PIEZO_PIN, 1450, 50); delay(60);
-          tone(PETBOT_PIEZO_PIN, 2050, 75);
-        } else if (microAction == "WIDE_EYES") {
-          tone(PETBOT_PIEZO_PIN, 2250, 85);
-        } else if (microAction == "SQUINT") {
-          tone(PETBOT_PIEZO_PIN, 430, 70); delay(75);
-          tone(PETBOT_PIEZO_PIN, 320, 90);
-        } else if (microAction == "LOOK_AROUND") {
-          tone(PETBOT_PIEZO_PIN, 1050, 45); delay(55);
-          tone(PETBOT_PIEZO_PIN, 1550, 55); delay(55);
-          tone(PETBOT_PIEZO_PIN, 1250, 45);
-        } else if (microAction == "LOOK_UP") {
-          tone(PETBOT_PIEZO_PIN, 1350, 50); delay(55);
-          tone(PETBOT_PIEZO_PIN, 1700, 60);
-        } else {
-          tone(PETBOT_PIEZO_PIN, 950 + (esp_random() % 650), 55);
-        }
+        // Routed through the voice task (low priority) so it never collides with other sounds.
+        const char* voiceMood = "CURIOUS";
+        if (microAction == "EXCITED") voiceMood = "HAPPY";
+        else if (microAction == "WIDE_EYES") voiceMood = "SURPRISED";
+        else if (microAction == "SQUINT") voiceMood = "ANNOYED";
+        requestVoice(voiceMood, true);
         lastMoodSoundAt = millis();
       }
     }

@@ -1,4 +1,4 @@
-const { db, authorizedDevice, jsonError } = require("../_petbot");
+const { db, authorizedDevice, jsonError, cleanDrives } = require("../_petbot");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -15,6 +15,7 @@ module.exports = async function handler(req, res) {
     free_heap: Number.isFinite(body.free_heap) ? Math.max(0, body.free_heap) : null,
     ip: typeof body.ip === "string" ? body.ip.slice(0, 45) : null,
     mood: typeof body.mood === "string" && ["HAPPY", "CURIOUS", "SLEEPY", "SURPRISED", "ANNOYED", "LOVE", "SAD"].includes(body.mood) ? body.mood : null,
+    drives: cleanDrives(body.drives),
     autonomy: body.autonomy === true,
     battery_mv: Number.isFinite(body.battery_mv) ? Math.max(0, Math.min(6000, body.battery_mv)) : null,
     uv_sensor_connected: body.uv_sensor_connected === true,

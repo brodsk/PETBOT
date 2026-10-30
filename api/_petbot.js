@@ -1,5 +1,58 @@
 const MOODS = new Set(["HAPPY", "CURIOUS", "SLEEPY", "SURPRISED", "ANNOYED", "LOVE", "SAD"]);
 
+const IMPULSES = new Set(["CHAT", "AFFECTION", "PRAISE", "SCOLD"]);
+const DRIVE_KEYS = ["curiosity", "energy", "mood_value", "attachment", "stimulation", "social_need", "confidence"];
+
+function cleanDrives(input) {
+  if (!input || typeof input !== "object") return null;
+  const out = {};
+  for (const key of DRIVE_KEYS) {
+    const v = input[key];
+    if (!Number.isFinite(v)) return null;
+    out[key] = Math.max(0, Math.min(100, Math.round(v)));
+  }
+  return out;
+}
+
+// Plain-language description of the robot's real internal state for the LLM prompt.
+function describeDrives(d) {
+  if (!d) return "";
+  const lvl = (v, low, mid, high) => (v < 30 ? low : v < 65 ? mid : high);
+  return [
+    "энергия: " + lvl(d.energy, "почти нет сил, хочется спать", "нормальная", "много сил"),
+    "настроение: " + lvl(d.mood_value, "грустноватое", "ровное", "приподнятое"),
+    "любопытство: " + lvl(d.curiosity, "низкое", "умеренное", "высокое, всё интересно"),
+    "потребность в общении: " + lvl(d.social_need, "наобщался", "обычная", "сильно соскучился по вниманию"),
+    "привязанность к хозяину: " + lvl(d.attachment, "ещё привыкаешь", "тёплая", "очень сильная"),
+    "возбуждение: " + lvl(d.stimulation, "спокойный", "бодрый", "взбудоражен"),
+    "уверенность: " + lvl(d.confidence, "робеешь", "обычная", "уверен в себе")
+  ].join("; ");
+}
+
+// The model is asked for JSON, but small models drift: accept fenced or bare JSON,
+// and fall back to plain text so the user never sees raw JSON or an empty reply.
+function parseModelReply(raw) {
+  const text = String(raw || "").trim();
+  const fallback = { reply: text.replace(/^```(?:json)?|```$/gim, "").trim(), mood: null, impulse: "CHAT" };
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end <= start) return fallback;
+  try {
+    const obj = JSON.parse(text.slice(start, end + 1));
+    const reply = typeof obj.reply === "string" ? obj.reply.trim() : "";
+    if (!reply) return fallback;
+    const mood = typeof obj.mood === "string" ? obj.mood.trim().toUpperCase() : "";
+    const impulse = typeof obj.impulse === "string" ? obj.impulse.trim().toUpperCase() : "";
+    return {
+      reply: reply.slice(0, 1200),
+      mood: MOODS.has(mood) ? mood : null,
+      impulse: IMPULSES.has(impulse) ? impulse : "CHAT"
+    };
+  } catch (e) {
+    return fallback;
+  }
+}
+
 function config() {
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -62,4 +115,4 @@ function jsonError(res, error) {
   });
 }
 
-module.exports = { MOODS, db, authorizedDevice, jsonError };
+module.exports = { MOODS, IMPULSES, cleanDrives, describeDrives, parseModelReply, db, authorizedDevice, jsonError };
