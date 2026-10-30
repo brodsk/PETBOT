@@ -76,7 +76,7 @@ uint32_t interactionCount = 0;
 // Local pet needs/personality model. Runs on the ESP32 even without cloud access.
 int petCuriosity = 58;       // rises during quiet time; positive interaction settles it
 int petEnergy = 88;          // falls while awake and recovers while sleeping
-int petMoodValue = 68;        // general affect, separate from the displayed mood label
+int petMoodValue = 68;       // general affect, separate from the displayed mood label
 int petAttachment = 12;      // grows gradually through positive interactions
 int petStimulation = 24;     // short-lived arousal/alertness from events
 int petSocialNeed = 32;      // rises slowly during isolation; contact relieves it
@@ -148,13 +148,11 @@ void registerPetInteraction(bool affectionate) {
 }
 // ---------------------------------------------------------------------------
 // PETBOT voice: Vector-style non-verbal vocalizations on a passive piezo.
-// Instead of fixed beeps, a phrase is a chain of gliding / vibrato / purr /
-// trill segments, built fresh each time with random variation and coloured by
-// the internal drives (tired = slower and lower, excited = quicker and higher,
-// attached = longer purrs). It runs in its own FreeRTOS task, so the OLED
-// face, Wi-Fi polling and blinking are never blocked while PETBOT "talks".
+// The phrase engine now builds more expressive robot syllables, not only pure
+// tone glides. This makes idle sounds and reactions feel more like a living
+// companion instead of a simple buzzer.
 // ---------------------------------------------------------------------------
-enum VoiceMod : uint8_t { VM_GLIDE, VM_VIBRATO, VM_PURR, VM_TRILL, VM_REST };
+enum VoiceMod : uint8_t { VM_GLIDE, VM_VIBRATO, VM_PURR, VM_TRILL, VM_REST, VM_BURBLE, VM_CHIRP };
 struct VoiceSeg { uint16_t f0; uint16_t f1; uint16_t ms; uint8_t mod; };
 #define VOICE_MAX_SEGS 12
 // Request byte: low 7 bits = mood code (1..8), bit 7 = low-priority idle murmur.
@@ -194,51 +192,59 @@ static void vRest(uint16_t ms) { vAdd(0, 0, ms, VM_REST); }
 
 static void buildVoice(uint8_t code, bool idle) {
   voiceLen = 0;
-  const uint32_t r = esp_random() % 3;
+  const uint32_t r = esp_random() % 4;
   switch (code) {
     case 1:  // HAPPY: bright rising chirps, ends in a bird-like trill
-      if (idle) { vAdd(vj(1500, 10), vj(2100, 10), 70, VM_GLIDE); break; }
-      if (r == 0) { vAdd(1300, 2300, 90, VM_GLIDE); vRest(35); vAdd(1700, 2700, 80, VM_GLIDE); vAdd(2400, 2400, 130, VM_TRILL); }
-      else if (r == 1) { vAdd(1600, 2400, 70, VM_GLIDE); vAdd(2400, 1500, 110, VM_VIBRATO); vRest(30); vAdd(1500, 2500, 100, VM_GLIDE); }
-      else { vAdd(1400, 2000, 60, VM_GLIDE); vRest(25); vAdd(1400, 2000, 60, VM_GLIDE); vRest(25); vAdd(1800, 2800, 120, VM_TRILL); }
+      if (idle) { vAdd(vj(1500, 10), vj(2100, 10), 70, VM_BURBLE); vRest(25); vAdd(vj(850, 15), vj(1200, 15), 80, VM_CHIRP); break; }
+      if (r == 0) { vAdd(1300, 2300, 90, VM_GLIDE); vRest(35); vAdd(1700, 2700, 80, VM_BURBLE); vAdd(2400, 2400, 130, VM_TRILL); }
+      else if (r == 1) { vAdd(1600, 2400, 70, VM_GLIDE); vAdd(2400, 1500, 110, VM_VIBRATO); vRest(30); vAdd(1500, 2500, 100, VM_CHIRP); }
+      else if (r == 2) { vAdd(1400, 2000, 60, VM_CHIRP); vRest(25); vAdd(1400, 2000, 60, VM_BURBLE); vRest(25); vAdd(1800, 2800, 120, VM_TRILL); }
+      else { vAdd(1200, 1900, 80, VM_CHIRP); vRest(25); vAdd(1700, 2600, 90, VM_GLIDE); vRest(20); vAdd(2200, 2200, 150, VM_TRILL); }
       break;
     case 2:  // CURIOUS: question-like upward glides and wobbles
-      if (idle) { vAdd(vj(1000, 15), vj(1500, 15), 90, VM_GLIDE); break; }
+      if (idle) { vAdd(vj(1000, 15), vj(1500, 15), 90, VM_BURBLE); vRest(35); vAdd(vj(750, 10), vj(1200, 12), 60, VM_CHIRP); break; }
       if (r == 0) { vAdd(900, 1500, 150, VM_GLIDE); vRest(60); vAdd(1500, 1700, 130, VM_VIBRATO); }
-      else if (r == 1) { vAdd(1200, 1000, 60, VM_GLIDE); vRest(40); vAdd(1000, 1800, 160, VM_GLIDE); vAdd(1800, 1800, 90, VM_TRILL); }
-      else { vAdd(1100, 1700, 110, VM_VIBRATO); vRest(50); vAdd(1300, 1900, 90, VM_GLIDE); }
+      else if (r == 1) { vAdd(1200, 1000, 60, VM_BURBLE); vRest(40); vAdd(1000, 1800, 160, VM_GLIDE); vAdd(1800, 1800, 90, VM_TRILL); }
+      else if (r == 2) { vAdd(1100, 1700, 110, VM_VIBRATO); vRest(50); vAdd(1300, 1900, 90, VM_BURBLE); }
+      else { vAdd(800, 1600, 120, VM_CHIRP); vRest(35); vAdd(1600, 2200, 140, VM_GLIDE); }
       break;
     case 3:  // SURPRISED: quick squeak, then a wobbly fall
-      vAdd(1400, 2900, 60, VM_GLIDE);
+      vAdd(1400, 2900, 60, VM_CHIRP);
       vAdd(2900, 1800, 130, VM_VIBRATO);
       if (r == 2) { vRest(40); vAdd(1500, 2200, 70, VM_GLIDE); }
+      else if (r == 3) { vAdd(2200, 1600, 120, VM_BURBLE); }
       break;
     case 4: {  // LOVE: a coo and a purr; the more attached, the longer it purrs
       const uint16_t purrMs = (uint16_t)(450 + min(100, max(0, petAttachment)) * 5);
-      if (idle) { vAdd(1200, 1500, 150, VM_VIBRATO); vAdd(1100, 900, purrMs / 2, VM_PURR); break; }
+      if (idle) { vAdd(1200, 1500, 150, VM_VIBRATO); vAdd(1100, 900, purrMs / 2, VM_PURR); vRest(25); vAdd(1500, 1800, 120, VM_BURBLE); break; }
       vAdd(1100, 1700, 140, VM_GLIDE);
       vAdd(1100, 900, purrMs, VM_PURR);
       vAdd(1700, 1300, 200, VM_VIBRATO);
+      if (r == 2) vAdd(1300, 1600, 110, VM_BURBLE);
       break;
     }
     case 5:  // ANNOYED: low grumble, then a disapproving drop
-      if (idle) { vAdd(600, 450, 180, VM_PURR); break; }
+      if (idle) { vAdd(600, 450, 180, VM_PURR); vRest(25); vAdd(520, 420, 120, VM_CHIRP); break; }
       vAdd(700, 500, 260, VM_PURR);
       vRest(50);
       vAdd(520, 320, 140, VM_GLIDE);
       if (r == 2) { vRest(40); vAdd(450, 450, 200, VM_PURR); }
+      else if (r == 3) { vRest(20); vAdd(370, 280, 130, VM_BURBLE); }
       break;
-    case 6:  // SLEEPY: a yawn; when idle, a soft snore
-      if (idle) { vAdd(700, 520, 320, VM_PURR); break; }
+    case 6:  // SLEEPY: a yawn; when idle, a slow snore
+      if (idle) { vAdd(700, 520, 320, VM_PURR); vRest(90); vAdd(430, 360, 220, VM_BURBLE); break; }
       vAdd(1200, 1500, 200, VM_VIBRATO);
       vAdd(1500, 500, 520, VM_VIBRATO);
+      if (r == 3) vAdd(470, 330, 280, VM_PURR);
       break;
     case 7:  // SAD: slow descending whimper
       vAdd(1300, 800, idle ? 260 : 420, VM_VIBRATO);
-      if (!idle) { vRest(90); vAdd(1000, 520, 380, VM_VIBRATO); }
+      if (!idle) { vRest(90); vAdd(1000, 520, 380, VM_BURBLE); }
+      else { vRest(40); vAdd(600, 400, 240, VM_PURR); }
       break;
     default:
-      vAdd(1200, 1200, 55, VM_GLIDE);
+      vAdd(1200, 1200, 55, VM_BURBLE);
+      vAdd(1300, 1000, 80, VM_CHIRP);
   }
 }
 
@@ -263,6 +269,8 @@ static bool playVoiceSegs(bool idle) {
         if (s.mod == VM_VIBRATO) f *= 1.0f + 0.045f * sinf((float)t * 0.0408f);  // ~6.5 Hz wobble
         else if (s.mod == VM_PURR) f *= ((t / 18) & 1) ? 0.90f : 1.0f;            // ~28 Hz flutter = purr
         else if (s.mod == VM_TRILL) f *= ((t / 32) & 1) ? 1.20f : 1.0f;           // ~15 Hz warble
+        else if (s.mod == VM_BURBLE) f *= 1.0f + 0.08f * sinf((float)t * 0.068f);
+        else if (s.mod == VM_CHIRP) f *= 1.0f + 0.16f * sinf((float)t * 0.095f);
         const unsigned int fi = (unsigned int)f;
         if (fi != lastF) { tone(PETBOT_PIEZO_PIN, fi); lastF = fi; }
       }
@@ -443,8 +451,13 @@ void drawFace() {
   const bool annoyed = mood == "ANNOYED" || squint;
   const bool sad = mood == "SAD";
 
-  // Vector-inspired face: bold capsule eyes, crisp pupils and small mouth.
-  // Keep all expressions inside the 128x64 OLED safe area.
+  // Extra life: pupils and eye shapes drift slightly even while the robot is idle,
+  // so the face does not look rigid or static.
+  const float lifeWaveX = 0.8f * sinf(millis() * 0.008f + 0.7f);
+  const float lifeWaveY = 0.7f * cosf(millis() * 0.01f + 1.3f);
+  const int pupilDriftX = (int)roundf(glanceX + lifeWaveX);
+  const int pupilDriftY = (int)roundf(glanceY + lifeWaveY);
+
   if (sleepy) {
     display.fillRoundRect(leftX - eyeW/2, eyeY - 4, eyeW, 9, 4, SSD1306_WHITE);
     display.fillRoundRect(rightX - eyeW/2, eyeY - 4, eyeW, 9, 4, SSD1306_WHITE);
@@ -461,22 +474,21 @@ void drawFace() {
       display.fillTriangle(cx - 10, cy, cx + 10, cy, cx, cy + 13, SSD1306_WHITE);
     }
   } else if (sad) {
-    // Drooping eyelids and inward-tilted brows create a distinct sad expression.
     display.fillRoundRect(leftX - 14, eyeY - 12, 28, 27, 10, SSD1306_WHITE);
     display.fillRoundRect(rightX - 14, eyeY - 12, 28, 27, 10, SSD1306_WHITE);
     display.fillRect(leftX - 15, eyeY - 13, 30, 9, SSD1306_BLACK);
     display.fillRect(rightX - 15, eyeY - 13, 30, 9, SSD1306_BLACK);
-    display.fillCircle(leftX + glanceX, eyeY + 4 + glanceY, 5, SSD1306_BLACK);
-    display.fillCircle(rightX + glanceX, eyeY + 4 + glanceY, 5, SSD1306_BLACK);
+    display.fillCircle(leftX + pupilDriftX, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
+    display.fillCircle(rightX + pupilDriftX, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
     display.drawLine(leftX - 13, eyeY - 18, leftX + 5, eyeY - 12, SSD1306_WHITE);
     display.drawLine(rightX - 5, eyeY - 12, rightX + 13, eyeY - 18, SSD1306_WHITE);
   } else if (mood == "SURPRISED") {
     display.drawRoundRect(leftX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
     display.drawRoundRect(rightX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
-    display.fillCircle(leftX + glanceX, eyeY + glanceY, 7, SSD1306_WHITE);
-    display.fillCircle(rightX + glanceX, eyeY + glanceY, 7, SSD1306_WHITE);
-    display.fillCircle(leftX + glanceX, eyeY + glanceY, 3, SSD1306_BLACK);
-    display.fillCircle(rightX + glanceX, eyeY + glanceY, 3, SSD1306_BLACK);
+    display.fillCircle(leftX + pupilDriftX, eyeY + pupilDriftY, 7, SSD1306_WHITE);
+    display.fillCircle(rightX + pupilDriftX, eyeY + pupilDriftY, 7, SSD1306_WHITE);
+    display.fillCircle(leftX + pupilDriftX, eyeY + pupilDriftY, 3, SSD1306_BLACK);
+    display.fillCircle(rightX + pupilDriftX, eyeY + pupilDriftY, 3, SSD1306_BLACK);
   } else if (happy) {
     // Happy crescent eyes with a lifted outer corner.
     display.drawLine(leftX - 13, eyeY + 3, leftX - 7, eyeY - 5, SSD1306_WHITE);
@@ -494,9 +506,9 @@ void drawFace() {
     display.fillRoundRect(leftX - eyeW/2, top, eyeW, height, 11, SSD1306_WHITE);
     display.fillRoundRect(rightX - eyeW/2, top, eyeW, height, 11, SSD1306_WHITE);
 
-    int pupilY = eyeY + glanceY;
-    int pupilLX = leftX + 2 + glanceX;
-    int pupilRX = rightX + 2 + glanceX;
+    int pupilY = eyeY + pupilDriftY;
+    int pupilLX = leftX + 2 + pupilDriftX;
+    int pupilRX = rightX + 2 + pupilDriftX;
     if (mood == "CURIOUS") pupilY -= 4;
     if (annoyed) pupilY += 4;
     display.fillCircle(pupilLX, pupilY, 6, SSD1306_BLACK);
@@ -810,7 +822,7 @@ void handleSerialProvisioning() {
   } else if (line == "HELP") {
     printPetbotHelp();
   } else if (line == "NEEDS") {
-    Serial.printf("PETBOT state: curiosity=%d energy=%d mood=%d attachment=%d stimulation=%d social_need=%d confidence=%d interactions=%lu\n", petCuriosity, petEnergy, petMoodValue, petAttachment, petStimulation, petSocialNeed, petConfidence, (unsigned long)interactionCount);
+    Serial.printf("PETBOT state: curiosity=%d energy=%d mood=%d attachment=%d stimulation=%d social_need=%d confidence=%d interactions=%lu\n", petCuriosity, petEnergy, petMoodValue, petAttachment, petStimulation, petSocialNeed, petConfidence, interactionCount);
   } else if (line == "EVENT:SOUND") {
     petStimulation = min(100, petStimulation + 28);
     petConfidence = max(0, petConfidence - 1);
@@ -819,6 +831,7 @@ void handleSerialProvisioning() {
     moodOverrideUntil = millis() + 2200UL;
     nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
     gazeTargetX = (esp_random() & 1) ? -5.0f : 5.0f;
+    gazeTargetY = -1.0f;
     microAction = "WIDE_EYES";
     microActionUntil = millis() + 650UL;
     playRobotSound("SURPRISED");
@@ -1220,10 +1233,23 @@ void updateMicroAction() {
   const float easing = 0.22f;
   float oldX = gazeX;
   float oldY = gazeY;
-  gazeX += (gazeTargetX - gazeX) * easing;
-  gazeY += (gazeTargetY - gazeY) * easing;
-  if (fabsf(gazeTargetX - gazeX) < 0.18f) gazeX = gazeTargetX;
-  if (fabsf(gazeTargetY - gazeY) < 0.18f) gazeY = gazeTargetY;
+  float idleDriftX = 0.0f;
+  float idleDriftY = 0.0f;
+
+  const unsigned long idleFor = now - lastActivity;
+  if (now >= moodOverrideUntil && mood != "SLEEPY" && petEnergy >= 18) {
+    idleDriftX = 1.5f * sinf((float)now * 0.0016f + petCuriosity * 0.06f);
+    idleDriftY = 1.0f * cosf((float)now * 0.0013f + petMoodValue * 0.04f);
+    if (idleFor > 45000UL) {
+      idleDriftX *= 1.3f;
+      idleDriftY *= 1.4f;
+    }
+  }
+
+  gazeX += (gazeTargetX + idleDriftX - gazeX) * easing;
+  gazeY += (gazeTargetY + idleDriftY - gazeY) * easing;
+  if (fabsf(gazeTargetX + idleDriftX - gazeX) < 0.18f) gazeX = gazeTargetX + idleDriftX;
+  if (fabsf(gazeTargetY + idleDriftY - gazeY) < 0.18f) gazeY = gazeTargetY + idleDriftY;
   bool gazeMoved = (fabsf(gazeX - oldX) > 0.15f || fabsf(gazeY - oldY) > 0.15f);
 
   if (now < moodOverrideUntil || mood == "SLEEPY" || petEnergy < 18) {
@@ -1248,7 +1274,7 @@ void updateMicroAction() {
     }
     if (now >= nextMicroActionAt) {
       // Small autonomous scenes: glances, excited eyes, surprise and a grumpy squint.
-      const uint32_t action = esp_random() % 8;
+      const uint32_t action = esp_random() % 12;
       if (action == 0) {
         microAction = "LOOK_LEFT"; gazeTargetX = -7.0f; gazeTargetY = 0.0f;
       } else if (action == 1) {
@@ -1264,9 +1290,15 @@ void updateMicroAction() {
         gazeTargetX = (esp_random() & 1) ? -3.0f : 3.0f; gazeTargetY = 0.0f;
       } else if (action == 6) {
         microAction = "SQUINT"; gazeTargetX = 0.0f; gazeTargetY = 1.0f;
-      } else {
+      } else if (action == 7) {
         microAction = "LOOK_AROUND";
         gazeTargetX = (esp_random() & 1) ? -7.0f : 7.0f; gazeTargetY = -2.0f;
+      } else if (action == 8) {
+        microAction = "FOLLOW"; gazeTargetX = (esp_random() & 1) ? -4.5f : 4.5f; gazeTargetY = (esp_random() & 1) ? -2.0f : 2.0f;
+      } else if (action == 9) {
+        microAction = "NOD"; gazeTargetX = 0.0f; gazeTargetY = -1.0f;
+      } else {
+        microAction = "GLANCE"; gazeTargetX = (esp_random() & 1) ? -6.0f : 6.0f; gazeTargetY = 1.5f;
       }
       microActionUntil = now + 750UL + (esp_random() % 950UL);
       drawFace();
@@ -1278,6 +1310,8 @@ void updateMicroAction() {
         if (microAction == "EXCITED") voiceMood = "HAPPY";
         else if (microAction == "WIDE_EYES") voiceMood = "SURPRISED";
         else if (microAction == "SQUINT") voiceMood = "ANNOYED";
+        else if (microAction == "FOLLOW" || microAction == "GLANCE") voiceMood = "CURIOUS";
+        else if (microAction == "NOD") voiceMood = "LOVE";
         requestVoice(voiceMood, true);
         lastMoodSoundAt = millis();
       }
