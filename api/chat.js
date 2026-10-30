@@ -24,6 +24,51 @@ function impulseForMessage(message) {
   return "CHAT";
 }
 
+function emotionalizeReply(reply, mood) {
+  if (!reply || typeof reply !== "string") return reply;
+  const variants = {
+    LOVE: [
+      "мягко улыбается и смотрит очень тепло.",
+      "чуть смущается и тянется ближе.",
+      "тихо мурчит и греет тебя взглядом."
+    ],
+    HAPPY: [
+      "глазки у PETBOT светятся от радости.",
+      "робот чуть подпрыгивает от удовольствия.",
+      "счастливо крутится и улыбается."
+    ],
+    CURIOUS: [
+      "головка наклоняется в любопытстве.",
+      "зрачки бегают по сторонам, будто что-то изучает.",
+      "глаза горят вниманием и интересом."
+    ],
+    SURPRISED: [
+      "глаза широко распахиваются от удивления.",
+      "робот вздрагивает и моргает чаще обычного.",
+      "замер на секунду, а потом быстро ожил."
+    ],
+    SLEEPY: [
+      "потягивается и чуть закрывает глаза.",
+      "зевает, будто уже почти уснул.",
+      "вяло моргает и теряет фокус."
+    ],
+    ANNOYED: [
+      "поджимает губы и чуть хмурится.",
+      "смотрит с лёгкой обидой.",
+      "отворачивается на секунду и снова возвращается."
+    ],
+    SAD: [
+      "опускает взгляд и становится тише.",
+      "глубоко вздыхает, будто немного грустит.",
+      "чуть тоскливо смотрит в сторону."
+    ]
+  };
+
+  const list = variants[mood] || variants.CURIOUS;
+  const suffix = list[Math.floor(Math.random() * list.length)];
+  return `${reply.trim()} ${suffix}`;
+}
+
 function buildCompanionProfile(messages, memoryContext, driveText, robotState) {
   const userText = (messages && messages.length ? messages[messages.length - 1]?.content || "" : "")
     .replace(/\s+/g, " ")
@@ -261,6 +306,7 @@ module.exports = async function handler(req, res) {
     const derivedImpulse = impulseForMessage(lastUserText);
     const finalMood = parsed.mood || derivedMood;
     const finalImpulse = parsed.impulse === "CHAT" && derivedImpulse !== "CHAT" ? derivedImpulse : parsed.impulse || derivedImpulse;
+    const emotionalReply = emotionalizeReply(parsed.reply, finalMood);
 
     try {
       const patch = { desired_mood: finalMood, updated_at: new Date().toISOString() };
@@ -284,7 +330,7 @@ module.exports = async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
-      reply: parsed.reply,
+      reply: emotionalReply,
       mood: finalMood,
       impulse: finalImpulse
     });
