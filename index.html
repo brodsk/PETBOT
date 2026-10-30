@@ -974,13 +974,24 @@
       cameraToggle.disabled = true;
       cameraStatus.textContent = 'Запрашиваю разрешение на камеру…';
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
-        });
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { ideal: 'user' }, width: { ideal: 640 }, height: { ideal: 480 } }
+          });
+        } catch (firstError) {
+          // Some Android browsers reject facingMode constraints; retry with the browser default camera.
+          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+        }
         cameraStream = stream;
+        cameraPreview.muted = true;
+        cameraPreview.autoplay = true;
+        cameraPreview.playsInline = true;
         cameraPreview.srcObject = stream;
         cameraPreview.style.display = 'block';
+        cameraPreview.style.width = '100%';
+        cameraPreview.style.visibility = 'visible';
         await cameraPreview.play();
 
         cameraToggle.textContent = '▣ Выключить видео';
@@ -988,34 +999,35 @@
         cameraAsk.disabled = false;
         cameraStatus.textContent = 'Видео включено. PETBOT наблюдает за сценой и реагирует на заметные изменения.';
 
-        // Scene observation is a separate enhancement; failure here must not turn video off.
-        try {
-          if (!window.visionTasksPromise) {
-            window.visionTasksPromise = import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm')
-              .then(async vision => {
-                const files = await vision.FilesetResolver.forVisionTasks(
-                  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-                );
-                return vision.FaceDetector.createFromOptions(files, {
-                  baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
-                    delegate: 'GPU'
-                  },
-                  runningMode: 'VIDEO',
-                  minDetectionConfidence: 0.55
-                });
+        // Start vision immediately. The optional face-model CDN must never block the camera button or preview.
+        if (visionTimer) clearInterval(visionTimer);
+        visionTimer = setInterval(analyzeCameraFrame, 20000);
+        setTimeout(analyzeCameraFrame, 1500);
+        if (!window.visionTasksPromise) {
+          window.visionTasksPromise = import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm')
+            .then(async vision => {
+              const files = await vision.FilesetResolver.forVisionTasks(
+                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+              );
+              return vision.FaceDetector.createFromOptions(files, {
+                baseOptions: {
+                  modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+                  delegate: 'GPU'
+                },
+                runningMode: 'VIDEO',
+                minDetectionConfidence: 0.55
               });
-          }
-          faceDetector = await window.visionTasksPromise;
-          if (!cameraStream) return;
-          faceTimer = setInterval(scanForFace, 700);
-          visionTimer = setInterval(analyzeCameraFrame, 20000);
-          setTimeout(analyzeCameraFrame, 2500);
-        } catch (error) {
-          faceDetector = null;
-          cameraStatus.textContent = 'Видео включено. Дополнительное распознавание сцены не загрузилось, но кадр можно отправить сообщением.';
-          console.warn('PETBOT optional vision model unavailable:', error);
+            });
         }
+        window.visionTasksPromise.then(detector => {
+          if (!cameraStream || cameraStream !== stream) return;
+          faceDetector = detector;
+          if (faceTimer) clearInterval(faceTimer);
+          faceTimer = setInterval(scanForFace, 700);
+        }).catch(error => {
+          console.warn('PETBOT optional face detector unavailable:', error);
+          if (cameraStream === stream) cameraStatus.textContent = 'Видео работает. Распознавание лиц недоступно, но анализ сцены продолжает работать.';
+        });
       } catch (error) {
         if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
         cameraStream = null;
