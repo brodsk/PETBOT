@@ -682,6 +682,117 @@
     let lastVoiceTextAt = 0;
     let lastGreetingAt = 0;
 
+    // Register camera control immediately after its state is initialized.
+    // Delegate camera clicks from the toolbar, even if the control is moved in the DOM.
+    document.addEventListener('click', async (event) => {
+      const clickedCameraButton = event.target && event.target.closest ? event.target.closest('#camera-toggle') : null;
+      if (!clickedCameraButton) return;
+      event.preventDefault();
+      // Toggle the actual browser MediaStream. Face detection is optional and must never block video.
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+        latestVisionContext = '';
+        lastVisionDescription = '';
+        cameraPreview.pause();
+        cameraPreview.srcObject = null;
+        cameraPreview.style.display = 'none';
+        cameraToggle.textContent = '▣ Видео';
+        cameraToggle.setAttribute('aria-pressed', 'false');
+        cameraStatus.textContent = 'Видео выключено. PETBOT не получает изображение.';
+        cameraAsk.disabled = true;
+        if (faceTimer) clearInterval(faceTimer);
+        if (visionTimer) clearInterval(visionTimer);
+        faceTimer = null;
+        visionTimer = null;
+        faceDetector = null;
+        faceSeen = false;
+        return;
+      }
+
+      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+        cameraStatus.textContent = 'Браузер не предоставляет доступ к камере. Открой сайт по HTTPS в актуальном Chrome/Edge.';
+        return;
+      }
+
+      clickedCameraButton.disabled = true;
+      cameraStatus.textContent = 'Нажатие получено. Запрашиваю разрешение на камеру…';
+      try {
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: { facingMode: { ideal: 'user' }, width: { ideal: 640 }, height: { ideal: 480 } }
+          });
+        } catch (firstError) {
+          // Some Android browsers reject facingMode constraints; retry with the browser default camera.
+          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+        }
+        cameraStream = stream;
+        cameraPreview.muted = true;
+        cameraPreview.autoplay = true;
+        cameraPreview.playsInline = true;
+        cameraPreview.srcObject = stream;
+        cameraPreview.style.display = 'block';
+        cameraPreview.style.width = '100%';
+        cameraPreview.style.visibility = 'visible';
+        await cameraPreview.play();
+
+        clickedCameraButton.textContent = '▣ Выключить видео';
+        clickedCameraButton.setAttribute('aria-pressed', 'true');
+        cameraAsk.disabled = false;
+        cameraStatus.textContent = 'Видео включено. PETBOT наблюдает за сценой и реагирует на заметные изменения.';
+
+        // Start vision immediately. The optional face-model CDN must never block the camera button or preview.
+        if (visionTimer) clearInterval(visionTimer);
+        visionTimer = setInterval(analyzeCameraFrame, 20000);
+        setTimeout(analyzeCameraFrame, 1500);
+        if (!window.visionTasksPromise) {
+          window.visionTasksPromise = import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm')
+            .then(async vision => {
+              const files = await vision.FilesetResolver.forVisionTasks(
+                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+              );
+              return vision.FaceDetector.createFromOptions(files, {
+                baseOptions: {
+                  modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+                  delegate: 'GPU'
+                },
+                runningMode: 'VIDEO',
+                minDetectionConfidence: 0.55
+              });
+            });
+        }
+        window.visionTasksPromise.then(detector => {
+          if (!cameraStream || cameraStream !== stream) return;
+          faceDetector = detector;
+          if (faceTimer) clearInterval(faceTimer);
+          faceTimer = setInterval(scanForFace, 700);
+        }).catch(error => {
+          console.warn('PETBOT optional face detector unavailable:', error);
+          if (cameraStream === stream) cameraStatus.textContent = 'Видео работает. Распознавание лиц недоступно, но анализ сцены продолжает работать.';
+        });
+      } catch (error) {
+        if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+        cameraPreview.pause();
+        cameraPreview.srcObject = null;
+        cameraPreview.style.display = 'none';
+        clickedCameraButton.textContent = '▣ Видео';
+        clickedCameraButton.setAttribute('aria-pressed', 'false');
+        const reason = error && error.name === 'NotAllowedError'
+          ? 'Браузер запретил доступ. Разреши камеру в настройках сайта и нажми снова.'
+          : error && error.name === 'NotFoundError'
+            ? 'Камера не найдена. Подключи камеру и попробуй снова.'
+            : error && error.name === 'NotReadableError'
+              ? 'Камера занята другим приложением. Закрой его и попробуй снова.'
+              : 'Не удалось включить видео: ' + (error && error.message ? error.message : 'неизвестная ошибка');
+        cameraStatus.textContent = reason;
+      } finally {
+        clickedCameraButton.disabled = false;
+      }
+    }, true);
+
     function startRecognitionSafely() {
       if (!recognition || !voiceEnabled || isSpeaking || voiceSubmitting) return;
       if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
@@ -943,115 +1054,6 @@
       }
     });
 
-    // Delegate camera clicks: the button is moved into the call toolbar during layout construction.
-    document.addEventListener('click', async (event) => {
-      const clickedCameraButton = event.target && event.target.closest ? event.target.closest('#camera-toggle') : null;
-      if (!clickedCameraButton) return;
-      event.preventDefault();
-      // Toggle the actual browser MediaStream. Face detection is optional and must never block video.
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-        cameraStream = null;
-        latestVisionContext = '';
-        lastVisionDescription = '';
-        cameraPreview.pause();
-        cameraPreview.srcObject = null;
-        cameraPreview.style.display = 'none';
-        cameraToggle.textContent = '▣ Видео';
-        cameraToggle.setAttribute('aria-pressed', 'false');
-        cameraStatus.textContent = 'Видео выключено. PETBOT не получает изображение.';
-        cameraAsk.disabled = true;
-        if (faceTimer) clearInterval(faceTimer);
-        if (visionTimer) clearInterval(visionTimer);
-        faceTimer = null;
-        visionTimer = null;
-        faceDetector = null;
-        faceSeen = false;
-        return;
-      }
-
-      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-        cameraStatus.textContent = 'Браузер не предоставляет доступ к камере. Открой сайт по HTTPS в актуальном Chrome/Edge.';
-        return;
-      }
-
-      clickedCameraButton.disabled = true;
-      cameraStatus.textContent = 'Нажатие получено. Запрашиваю разрешение на камеру…';
-      try {
-        let stream;
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: { facingMode: { ideal: 'user' }, width: { ideal: 640 }, height: { ideal: 480 } }
-          });
-        } catch (firstError) {
-          // Some Android browsers reject facingMode constraints; retry with the browser default camera.
-          stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
-        }
-        cameraStream = stream;
-        cameraPreview.muted = true;
-        cameraPreview.autoplay = true;
-        cameraPreview.playsInline = true;
-        cameraPreview.srcObject = stream;
-        cameraPreview.style.display = 'block';
-        cameraPreview.style.width = '100%';
-        cameraPreview.style.visibility = 'visible';
-        await cameraPreview.play();
-
-        clickedCameraButton.textContent = '▣ Выключить видео';
-        clickedCameraButton.setAttribute('aria-pressed', 'true');
-        cameraAsk.disabled = false;
-        cameraStatus.textContent = 'Видео включено. PETBOT наблюдает за сценой и реагирует на заметные изменения.';
-
-        // Start vision immediately. The optional face-model CDN must never block the camera button or preview.
-        if (visionTimer) clearInterval(visionTimer);
-        visionTimer = setInterval(analyzeCameraFrame, 20000);
-        setTimeout(analyzeCameraFrame, 1500);
-        if (!window.visionTasksPromise) {
-          window.visionTasksPromise = import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm')
-            .then(async vision => {
-              const files = await vision.FilesetResolver.forVisionTasks(
-                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-              );
-              return vision.FaceDetector.createFromOptions(files, {
-                baseOptions: {
-                  modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
-                  delegate: 'GPU'
-                },
-                runningMode: 'VIDEO',
-                minDetectionConfidence: 0.55
-              });
-            });
-        }
-        window.visionTasksPromise.then(detector => {
-          if (!cameraStream || cameraStream !== stream) return;
-          faceDetector = detector;
-          if (faceTimer) clearInterval(faceTimer);
-          faceTimer = setInterval(scanForFace, 700);
-        }).catch(error => {
-          console.warn('PETBOT optional face detector unavailable:', error);
-          if (cameraStream === stream) cameraStatus.textContent = 'Видео работает. Распознавание лиц недоступно, но анализ сцены продолжает работать.';
-        });
-      } catch (error) {
-        if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
-        cameraStream = null;
-        cameraPreview.pause();
-        cameraPreview.srcObject = null;
-        cameraPreview.style.display = 'none';
-        clickedCameraButton.textContent = '▣ Видео';
-        clickedCameraButton.setAttribute('aria-pressed', 'false');
-        const reason = error && error.name === 'NotAllowedError'
-          ? 'Браузер запретил доступ. Разреши камеру в настройках сайта и нажми снова.'
-          : error && error.name === 'NotFoundError'
-            ? 'Камера не найдена. Подключи камеру и попробуй снова.'
-            : error && error.name === 'NotReadableError'
-              ? 'Камера занята другим приложением. Закрой его и попробуй снова.'
-              : 'Не удалось включить видео: ' + (error && error.message ? error.message : 'неизвестная ошибка');
-        cameraStatus.textContent = reason;
-      } finally {
-        clickedCameraButton.disabled = false;
-      }
-    }, true);
 
     // Speech output is opt-in: responses are spoken only while voice mode is on.
     const originalAddBubble = addBubble;
