@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v3.2.0
+  PETBOT firmware v3.3.0
   Board: LILYGO T3 V1.6.1 / classic ESP32
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
@@ -17,7 +17,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.2.0";
+const char* FIRMWARE_VERSION = "petbot-3.3.0";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -31,6 +31,11 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define PETBOT_PIEZO_PIN 25
 #define PETBOT_MIC_PIN 34
 #define PETBOT_MIC_THRESHOLD_DEFAULT 240  // ADC delta; tune from Serial readings for your specific mic board.
+#define PETBOT_BUTTON_PIN 0  // BOOT button on most T3 V1.6.1 boards, active low
+#define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
+bool touchEnabled = false;
+int touchBaseline = 0;
+void calibrateTouch();
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -746,6 +751,7 @@ void printPetbotHelp() {
   Serial.println("PET - affectionate reaction");
   Serial.println("PLAY - happy sound");
   Serial.println("SOUND:ON / SOUND:OFF");
+  Serial.println("TOUCH:ON / TOUCH:OFF / TOUCH:READ - optional touch wire on GPIO4");
   Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD / PURR - test voice phrases");
   Serial.println("MIC:ON / MIC:OFF - enable or disable analog sound input");
   Serial.println("MIC:THRESHOLD=240 - set sound sensitivity (50..1500)");
@@ -861,6 +867,21 @@ void handleSerialProvisioning() {
     m.toUpperCase();
     requestVoice(m, false);
     Serial.println("Voice test: " + m);
+  } else if (line == "TOUCH:ON") {
+    touchEnabled = true;
+    calibrateTouch();
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("touch_en", touchEnabled);
+    petbotPrefs.end();
+    Serial.println(touchEnabled ? "Touch pad enabled." : "Touch pad NOT enabled.");
+  } else if (line == "TOUCH:OFF") {
+    touchEnabled = false;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("touch_en", false);
+    petbotPrefs.end();
+    Serial.println("Touch pad disabled.");
+  } else if (line == "TOUCH:READ") {
+    Serial.println("Touch raw=" + String(touchRead(PETBOT_TOUCH_PIN)) + " baseline=" + String(touchBaseline));
   } else if (line == "PURR") {
     requestVoice("LOVE", false);
   } else if (line == "SOUND:ON") {
@@ -925,11 +946,155 @@ void handleSerialProvisioning() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Physical interaction with no extra parts:
+//  * BOOT button (GPIO0, active low): 1 click = pet, 2 clicks = play,
+//    3+ clicks = poke (he gets annoyed), long press (1.5 s) = sleep / wake.
+//  * Optional touch pad: a bare wire or foil on PETBOT_TOUCH_PIN (ESP32
+//    capacitive touch, no module needed). Off by default; enable with TOUCH:ON.
+// ---------------------------------------------------------------------------
+volatile bool btnDown = false;
+volatile bool btnReleased = false;
+volatile uint32_t btnPressAt = 0;
+volatile uint32_t btnReleaseAt = 0;
+volatile uint32_t btnLastEdge = 0;
+uint8_t btnClicks = 0;
+uint32_t btnLastClickAt = 0;
+
+void IRAM_ATTR onButtonEdge() {
+  const uint32_t now = millis();
+  if (now - btnLastEdge < 25) return;  // debounce
+  btnLastEdge = now;
+  if (digitalRead(PETBOT_BUTTON_PIN) == LOW) {
+    btnDown = true;
+    btnPressAt = now;
+  } else if (btnDown) {
+    btnDown = false;
+    btnReleaseAt = now;
+    btnReleased = true;
+  }
+}
+
+static void ownerReact(const String& newMood, unsigned long holdMs) {
+  mood = newMood;
+  lastCloudMood = "";  // so the same cloud mood can be applied again later
+  moodOverrideUntil = millis() + holdMs;
+  nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+  eyesOpen = true;
+  playRobotSound(newMood);
+  drawFace();
+}
+
+void ownerPet() {
+  registerPetInteraction(true);
+  ownerReact("LOVE", 9000UL);
+  Serial.println("Owner: pet");
+}
+
+void ownerPlay() {
+  registerPetInteraction(false);
+  petStimulation = min(100, petStimulation + 8);
+  ownerReact("HAPPY", 6000UL);
+  Serial.println("Owner: play");
+}
+
+void ownerPoke() {
+  lastActivity = millis();
+  petMoodValue = max(0, petMoodValue - 6);
+  petStimulation = min(100, petStimulation + 8);
+  petSocialNeed = max(0, petSocialNeed - 4);
+  ownerReact("ANNOYED", 6000UL);
+  Serial.println("Owner: poke");
+}
+
+void ownerToggleSleep() {
+  if (mood == "SLEEPY") {
+    registerPetInteraction(false);
+    ownerReact("SURPRISED", 2500UL);
+    Serial.println("Owner: wake");
+  } else {
+    ownerReact("SLEEPY", 8000UL);
+    eyesOpen = false;
+    drawFace();
+    Serial.println("Owner: sleep");
+  }
+}
+
+void calibrateTouch() {
+  long sum = 0;
+  for (int i = 0; i < 25; i++) {
+    sum += touchRead(PETBOT_TOUCH_PIN);
+    delay(10);
+  }
+  touchBaseline = (int)(sum / 25);
+  Serial.println("Touch baseline: " + String(touchBaseline) + " (don't touch the pad while calibrating)");
+  if (touchBaseline < 15) {
+    touchEnabled = false;
+    Serial.println("Touch disabled: baseline too low. Check wiring / pin number.");
+  }
+}
+
+void updatePhysicalInput() {
+  const uint32_t now = millis();
+
+  if (btnReleased) {
+    btnReleased = false;
+    const uint32_t held = btnReleaseAt - btnPressAt;
+    if (held >= 1500UL) {
+      btnClicks = 0;
+      ownerToggleSleep();
+    } else {
+      btnClicks++;
+      btnLastClickAt = btnReleaseAt;
+    }
+  }
+  if (btnClicks && now - btnLastClickAt > 350UL) {
+    const uint8_t n = btnClicks;
+    btnClicks = 0;
+    if (n == 1) ownerPet();
+    else if (n == 2) ownerPlay();
+    else ownerPoke();
+  }
+
+  if (!touchEnabled) return;
+  static uint32_t lastTouchRead = 0, touchStartAt = 0, touchLastSeenAt = 0, touchLastPetAt = 0, touchLastPurrAt = 0;
+  static uint8_t touchHits = 0;
+  static bool touchHeld = false;
+  if (now - lastTouchRead < 40UL) return;
+  lastTouchRead = now;
+  const int v = touchRead(PETBOT_TOUCH_PIN);
+  const bool touched = touchBaseline > 0 && v < touchBaseline * 65 / 100;  // classic ESP32: value drops on touch
+  touchHits = touched ? (uint8_t)min(255, touchHits + 1) : 0;
+  if (touchHits >= 3) {  // ~120 ms of steady contact
+    touchLastSeenAt = now;
+    if (!touchHeld) {
+      touchHeld = true;
+      touchStartAt = now;
+      if (now - touchLastPetAt > 3000UL) {
+        touchLastPetAt = now;
+        ownerPet();
+      }
+    } else if (now - touchStartAt > 1500UL && now - touchLastPurrAt > 2500UL) {
+      // being stroked: keep purring and slowly feel better
+      touchLastPurrAt = now;
+      lastActivity = now;
+      moodOverrideUntil = now + 6000UL;
+      petSocialNeed = max(0, petSocialNeed - 4);
+      petMoodValue = min(100, petMoodValue + 2);
+      requestVoice("LOVE", false);
+    }
+  } else if (touchHeld && now - touchLastSeenAt > 400UL) {
+    touchHeld = false;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PETBOT_PIEZO_PIN, OUTPUT);
   xTaskCreatePinnedToCore(voiceTask, "petbot_voice", 4096, NULL, 1, NULL, 0);
   pinMode(PETBOT_MIC_PIN, INPUT);
+  pinMode(PETBOT_BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PETBOT_BUTTON_PIN), onButtonEdge, CHANGE);
   analogReadResolution(12);
   analogSetPinAttenuation(PETBOT_MIC_PIN, ADC_11db);
 
@@ -937,6 +1102,7 @@ void setup() {
   deviceToken = petbotPrefs.getString("device_token", "");
   soundEnabled = petbotPrefs.getBool("sound", true);
   micEnabled = petbotPrefs.getBool("mic_enabled", false);
+  touchEnabled = petbotPrefs.getBool("touch_en", false);
   micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
   interactionCount = petbotPrefs.getUInt("interactions", 0);
   petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
@@ -947,6 +1113,7 @@ void setup() {
   petSocialNeed = constrain(petbotPrefs.getInt("social_need", 32), 0, 100);
   petConfidence = constrain(petbotPrefs.getInt("confidence", 52), 0, 100);
   petbotPrefs.end();
+  if (touchEnabled) calibrateTouch();
 
   Serial.println(
       String("PETBOT firmware ") + FIRMWARE_VERSION
@@ -1211,6 +1378,7 @@ void loop() {
   updatePetNeeds();
   updateAutonomousMood();
   updateMicroAction();
+  updatePhysicalInput();
   sampleMicrophone();
   updateSoundPersonality();
 
