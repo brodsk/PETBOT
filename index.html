@@ -736,7 +736,18 @@
         cameraPreview.style.display = 'block';
         cameraPreview.style.width = '100%';
         cameraPreview.style.visibility = 'visible';
-        await cameraPreview.play();
+        // Do not tear down a valid camera stream if the browser rejects play() momentarily.
+        // Keep the preview mounted and retry playback when camera metadata arrives.
+        const tryPlayCameraPreview = () => cameraPreview.play().catch(error => {
+          console.warn('PETBOT camera preview playback deferred:', error);
+          cameraStatus.textContent = 'Камера подключена. Ожидаю видеопоток от браузера…';
+        });
+        cameraPreview.onloadedmetadata = tryPlayCameraPreview;
+        try { await cameraPreview.play(); }
+        catch (playError) {
+          console.warn('PETBOT initial camera preview playback deferred:', playError);
+          cameraStatus.textContent = 'Камера подключена. Запускаю изображение…';
+        }
 
         clickedCameraButton.textContent = '▣ Выключить видео';
         clickedCameraButton.setAttribute('aria-pressed', 'true');
