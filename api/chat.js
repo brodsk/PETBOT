@@ -1,7 +1,7 @@
 const { db, describeDrives, parseModelReply } = require("./_petbot");
 
 const MOOD_RULES = [
-  { mood: "LOVE", re: /(люблю|обнимаю|соскучился|соскучилась|милый|милая|котик|солнышко|зайка|малыш|ласка|целую|sweetheart|dear|love you|miss you|моя хорошая|мой хороший|красавчик|красотка|дружочек|лапочка)/i },
+  { mood: "LOVE", re: /(люблю|обнимаю|соскучился|соскучилась|милый|милая|котик|солнышко|зайка|малыш|ласка|целую|sweetheart|dear|love you|miss you|моя хорошая|мой хороший|красавчик|красотка|дружочек|лапочка|моя девочка|мой мальчик)/i },
   { mood: "HAPPY", re: /(привет|здравствуй|спасибо|класс|ура|молодец|хорошо|отлично|рад|рада|весело|смешно|играем|поиграем|круто|great|awesome|hello|hi|thanks)/i },
   { mood: "SURPRISED", re: /[!?]{2,}|(ого|вау|ничего себе|неожиданно|серьёзно|серьезно|не может быть|офигеть|удивительно|wow|omg|what\?|why\?|кто\?|как\?|что\?|как так)/i },
   { mood: "SLEEPY", re: /(спать|сонный|сонная|устал|устала|пора спать|good night|sleepy|tired|хочу спать|засыпаю|посплю)/i },
@@ -18,9 +18,9 @@ function moodForMessage(message) {
 
 function impulseForMessage(message) {
   const text = String(message || "").toLowerCase();
-  if (/(люблю|милый|милая|обним|ласка|соскуч|sweetheart|love you|miss you|дружочек|лапочка)/i.test(text)) return "AFFECTION";
+  if (/(люблю|милый|милая|обним|ласка|соскуч|sweetheart|love you|miss you|дружочек|лапочка|моя девочка|мой мальчик)/i.test(text)) return "AFFECTION";
   if (/(спасибо|молодец|круто|отлично|great|awesome|хорошо|ты молодец)/i.test(text)) return "PRAISE";
-  if (/(плохо|злюсь|не работает|достал|надоел|hate|angry|annoying|bad|не терплю)/i.test(text)) return "SCOLD";
+  if (/(плохо|злюсь|не работает|достал|надоел|hate|angry|annoying|bad|не терплю|бесит)/i.test(text)) return "SCOLD";
   return "CHAT";
 }
 
@@ -38,11 +38,11 @@ function buildCompanionProfile(messages, memoryContext, driveText, robotState) {
     tempo: "balanced"
   };
 
-  if (/люблю|милая|милый|красавчик|лапочка|соскуч|обним|ласка|sweetheart|love you|miss you/i.test(userText)) profile.attachment += 3;
-  if (/игра|поигра|смешно|шут|привет|приветик|хочешь|давай/i.test(userText)) profile.playfulness += 2;
-  if (/долго|не отвеча|где ты|скуч|один|alone|lonely|missing you/i.test(userText)) profile.loneliness += 3;
-  if (/не работает|ошибка|слом|злюсь|раздраж|бесит|я злюсь|не терплю/i.test(userText)) profile.protectiveness += 2;
-  if (/что|как|почему|расскажи|объясни|интересно|покажи/i.test(userText)) profile.curiosity += 3;
+  if (/люблю|милая|милый|красавчик|лапочка|соскуч|обним|ласка|sweetheart|love you|miss you|моя хорошая|мой хороший/i.test(userText)) profile.attachment += 3;
+  if (/игра|поигра|смешно|шут|привет|приветик|хочешь|давай|весело/i.test(userText)) profile.playfulness += 2;
+  if (/долго|не отвеча|где ты|скуч|один|alone|lonely|missing you|без тебя/i.test(userText)) profile.loneliness += 3;
+  if (/не работает|ошибка|слом|злюсь|раздраж|бесит|я злюсь|не терплю|криво|плохо/i.test(userText)) profile.protectiveness += 2;
+  if (/что|как|почему|расскажи|объясни|интересно|покажи|посмотри/i.test(userText)) profile.curiosity += 3;
 
   if (memoryContext && memoryContext.length > 80) profile.attachment += 1;
   if (driveText && /сильно соскучился по вниманию|высокое, всё интересно|привязанность|много сил/i.test(driveText)) profile.loneliness += 1;
