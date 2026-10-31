@@ -267,6 +267,11 @@
         <button class="mood-button" data-mood="ANNOYED" aria-pressed="false"><span class="mood-emoji">😠</span><span>Недовольство</span></button>
         <button class="mood-button" data-mood="LOVE" aria-pressed="false"><span class="mood-emoji">💚</span><span>Симпатия</span></button>
         <button class="mood-button" data-mood="SAD" aria-pressed="false"><span class="mood-emoji">😢</span><span>Грусть</span></button>
+        <button class="mood-button" data-mood="EXCITED" aria-pressed="false"><span class="mood-emoji">🤩</span><span>Восторг</span></button>
+        <button class="mood-button" data-mood="SHY" aria-pressed="false"><span class="mood-emoji">☺️</span><span>Смущение</span></button>
+        <button class="mood-button" data-mood="CONFUSED" aria-pressed="false"><span class="mood-emoji">😕</span><span>Растерянность</span></button>
+        <button class="mood-button" data-mood="BORED" aria-pressed="false"><span class="mood-emoji">😑</span><span>Скука</span></button>
+        <button class="mood-button" data-mood="SCARED" aria-pressed="false"><span class="mood-emoji">😨</span><span>Испуг</span></button>
       </div>
       <div class="actions">
         <button type="button" data-command="PING">Проверить робота</button>
@@ -325,8 +330,8 @@
     const hardwareValue = document.getElementById('hardware-value');
     const hardwareDetail = document.getElementById('hardware-detail');
     const eventList = document.getElementById('event-list');
-    const moodLabels = { HAPPY: 'Радость', CURIOUS: 'Любопытство', SLEEPY: 'Сонный', SURPRISED: 'Удивление', ANNOYED: 'Недовольство', LOVE: 'Симпатия', SAD: 'Грусть' };
-    const moodFaces = { HAPPY: '😊', CURIOUS: '👀', SLEEPY: '😴', SURPRISED: '😮', ANNOYED: '😠', LOVE: '💚', SAD: '😢' };
+    const moodLabels = { HAPPY: 'Радость', CURIOUS: 'Любопытство', SLEEPY: 'Сонный', SURPRISED: 'Удивление', ANNOYED: 'Недовольство', LOVE: 'Симпатия', SAD: 'Грусть', EXCITED: 'Восторг', SHY: 'Смущение', CONFUSED: 'Растерянность', BORED: 'Скука', SCARED: 'Испуг' };
+    const moodFaces = { HAPPY: '😊', CURIOUS: '👀', SLEEPY: '😴', SURPRISED: '😮', ANNOYED: '😠', LOVE: '💚', SAD: '😢', EXCITED: '🤩', SHY: '☺️', CONFUSED: '😕', BORED: '😑', SCARED: '😨' };
     const HISTORY_KEY = 'petbot-chat-history-v1';
     const VISION_COOLDOWN_KEY = 'petbot-vision-cooldown-v1';
     let history = loadHistory();
