@@ -584,7 +584,11 @@
         if (preview) chatCard.insertBefore(preview, log);
         if (cameraStatusNode) chatCard.insertBefore(cameraStatusNode, log);
         const askButton = cameraPanel.querySelector('#camera-ask');
-        if (askButton) askButton.style.display = 'none';
+        if (askButton) {
+          askButton.style.display = 'none';
+          // Keep the hidden control in the document: camera logic updates its disabled state.
+          chatCard.appendChild(askButton);
+        }
         if (cameraToggle) {
           cameraToggle.textContent = '▣ Видео';
           cameraToggle.setAttribute('aria-label', 'Включить или выключить видео');
