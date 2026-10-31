@@ -7,6 +7,11 @@ const MOOD_RULES = [
   { mood: "SLEEPY", re: /(спать|сонный|сонная|устал|устала|пора спать|good night|sleepy|tired|хочу спать|засыпаю|посплю)/i },
   { mood: "ANNOYED", re: /(бесит|злюсь|раздражает|ошибка|сломал|сломалось|не работает|ненавижу|достал|достало|надоел|задолбал|провал|злюсь|шумит|не терплю|annoying|hate|bad|плохой)/i },
   { mood: "SAD", re: /(скучно|тоска|грустно|печально|одиноко|плохо|жду тебя|где ты|не отвечаешь|соскучился|соскучилась|один|alone|lonely|missing you|bored|sad|upset)/i },
+  { mood: "SCARED", re: /(страшно|испугал|испугалась|опасно|внезапно|scared|afraid|fear)/i },
+  { mood: "CONFUSED", re: /(не понимаю|непонятно|запутал|странно|что происходит|как это|confused|puzzled)/i },
+  { mood: "EXCITED", re: /(ура|вау|побед|получилось|супер|потрясающе|невероятно|excited|amazing|awesome)/i },
+  { mood: "SHY", re: /(стесня|смущ|застенчив|робею|shy|embarrassed)/i },
+  { mood: "BORED", re: /(скучно|надоело|нечего делать|bored|boring)/i },
   { mood: "CURIOUS", re: /(почему|как|зачем|что такое|расскажи|объясни|интересно|покажи|посмотри|что видишь|наблюдение|что сейчас|что ты чувствуешь|как ты себя чувствуешь|кто ты|что делаешь|how|why|what|tell me|show me)/i }
 ];
 
@@ -61,7 +66,12 @@ function emotionalizeReply(reply, mood) {
       "опускает взгляд и становится тише.",
       "глубоко вздыхает, будто немного грустит.",
       "чуть тоскливо смотрит в сторону."
-    ]
+    ],
+    EXCITED: ["глаза радостно вспыхивают, и PETBOT издаёт быстрый весёлый сигнал.", "PETBOT широко раскрывает глаза и оживлённо пищит."],
+    SHY: ["PETBOT смущённо опускает взгляд и тихонько мурчит.", "робот чуть отводит глаза, словно застеснялся."],
+    CONFUSED: ["PETBOT наклоняет взгляд набок, пытаясь разобраться.", "глаза PETBOT вопросительно двигаются в разные стороны."],
+    BORED: ["PETBOT полуприкрывает глаза и скучающе смотрит перед собой.", "робот медленно моргает, будто ему стало скучно."],
+    SCARED: ["PETBOT резко раскрывает глаза и замирает настороженно.", "робот испуганно замирает, прислушиваясь."]
   };
 
   const list = variants[mood] || variants.CURIOUS;
@@ -133,10 +143,12 @@ const SYSTEM_PROMPT = `Ты PETBOT — маленький робот-компа�
 - Если он скучает или долго молчит — ты чувствуешь это как лёгкую тоску и отвечаешь мягко.
 - Если он хвалит тебя — ты радуешься и немного сияешь.
 - Если он злится — ты остаёшься спокойным, но с лёгкой обидой.
+- Используй разные эмоции: EXCITED (восторг), SHY (смущение), CONFUSED (растерянность), BORED (скука), SCARED (испуг), не своди всё к радости и любопытству.
+- Описывай только то, что реально может сделать плата: выражение глаз OLED и короткий электронный звук. Не выдумывай движения корпуса, рук или ног.
 - Если он говорит о тебе/с тобой в личных, тёплых тонах — ты ощущаешь это как дружбу, а не как API-подсказку.
 
 Формат вывода строго:
-{"reply":"<текст ответа>","mood":"<HAPPY|CURIOUS|SLEEPY|SURPRISED|ANNOYED|LOVE|SAD>","impulse":"<CHAT|AFFECTION|PRAISE|SCOLD>"}
+{"reply":"<текст ответа>","mood":"<HAPPY|CURIOUS|SLEEPY|SURPRISED|ANNOYED|LOVE|SAD|EXCITED|SHY|CONFUSED|BORED|SCARED>","impulse":"<CHAT|AFFECTION|PRAISE|SCOLD>"}
 
 Требование к ответу:
 - короткий, живой, тёплый
@@ -310,15 +322,14 @@ module.exports = async function handler(req, res) {
 
     try {
       const patch = { desired_mood: finalMood, updated_at: new Date().toISOString() };
-      if (!(robotState && robotState.pending_command)) {
-        patch.pending_command = {
-          id: Date.now().toString(36),
-          command: "CHAT_EVENT",
-          face: finalMood,
-          impulse: finalImpulse,
-          created_at: new Date().toISOString()
-        };
-      }
+      // New chat, voice, and vision reactions replace stale queued actions so the ESP32 receives the same emotion shown in chat.
+      patch.pending_command = {
+        id: Date.now().toString(36),
+        command: "CHAT_EVENT",
+        face: finalMood,
+        impulse: finalImpulse,
+        created_at: new Date().toISOString()
+      };
       await db("petbot_state?id=eq.1", {
         method: "PATCH",
         headers: { Prefer: "return=minimal" },
