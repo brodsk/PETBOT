@@ -1,4 +1,4 @@
-const MOODS = new Set(["HAPPY", "CURIOUS", "SLEEPY", "SURPRISED", "ANNOYED", "LOVE", "SAD"]);
+const MOODS = new Set(["HAPPY", "CURIOUS", "SLEEPY", "SURPRISED", "ANNOYED", "LOVE", "SAD", "EXCITED", "SHY", "CONFUSED", "BORED", "SCARED"]);
 
 const IMPULSES = new Set(["CHAT", "AFFECTION", "PRAISE", "SCOLD"]);
 const DRIVE_KEYS = ["curiosity", "energy", "mood_value", "attachment", "stimulation", "social_need", "confidence"];
