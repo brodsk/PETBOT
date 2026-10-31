@@ -29,49 +29,6 @@ function impulseForMessage(message) {
   return "CHAT";
 }
 
-function emotionalizeReply(reply, mood) {
-  if (!reply || typeof reply !== "string") return reply;
-  const variants = {
-    LOVE: [
-      "на OLED загораются глаза-сердечки, звучит мягкое мурлыканье.",
-      "PETBOT показывает сердечки и тихо мурчит."
-    ],
-    HAPPY: [
-      "на экране появляются весёлые прищуренные глаза, звучит радостная трель.",
-      "PETBOT улыбается глазами и отвечает коротким весёлым сигналом."
-    ],
-    CURIOUS: [
-      "зрачки на OLED внимательно осматривают сцену, звучит вопросительный писк.",
-      "PETBOT переводит взгляд по экрану и любопытно пищит."
-    ],
-    SURPRISED: [
-      "глаза на OLED широко раскрываются, звучит короткий сигнал удивления.",
-      "PETBOT показывает круглые удивлённые глаза и резко пищит."
-    ],
-    SLEEPY: [
-      "на экране появляются сонные полуприкрытые глаза, звучит тихий низкий сигнал.",
-      "PETBOT медленно прикрывает глаза и тихо мурчит."
-    ],
-    ANNOYED: [
-      "глаза на OLED сердито прищуриваются, звучит недовольный короткий сигнал.",
-      "PETBOT хмурится на экране и ворчит электронным тоном."
-    ],
-    SAD: [
-      "зрачки опускаются вниз, звучит тихий грустный сигнал.",
-      "PETBOT показывает грустные глаза и тихонько пищит."
-    ],
-    EXCITED: ["глаза радостно вспыхивают, и PETBOT издаёт быстрый весёлый сигнал.", "PETBOT широко раскрывает глаза и оживлённо пищит."],
-    SHY: ["PETBOT смущённо опускает взгляд и тихонько мурчит.", "робот чуть отводит глаза, словно застеснялся."],
-    CONFUSED: ["PETBOT наклоняет взгляд набок, пытаясь разобраться.", "глаза PETBOT вопросительно двигаются в разные стороны."],
-    BORED: ["PETBOT полуприкрывает глаза и скучающе смотрит перед собой.", "робот медленно моргает, будто ему стало скучно."],
-    SCARED: ["PETBOT резко раскрывает глаза и замирает настороженно.", "робот испуганно замирает, прислушиваясь."]
-  };
-
-  const list = variants[mood] || variants.CURIOUS;
-  const suffix = list[Math.floor(Math.random() * list.length)];
-  return `${reply.trim()} ${suffix}`;
-}
-
 function buildCompanionProfile(messages, memoryContext, driveText, robotState) {
   const userText = (messages && messages.length ? messages[messages.length - 1]?.content || "" : "")
     .replace(/\s+/g, " ")
@@ -114,6 +71,26 @@ function buildCompanionProfile(messages, memoryContext, driveText, robotState) {
   ].join(" ");
 }
 
+// The board shows the face and plays the sound by itself. If the model still narrates
+// its own hardware ("мои глазки моргают, звучит писк"), drop those sentences so the
+// chat contains only what PETBOT says. Never returns an empty string.
+const NARRATION_START = /^(?:мои\s+(?:глаз|зрачк)|на\s+(?:oled|экран)|(?:глаз|зрачк)\w*\s+(?:на\s+)?(?:oled|экран)|(?:petbot|робот)\s+(?:\w+\s+)?(?:показыва|улыба|хмур|прикрыва|раскрыва|переводит|пищит|мурчит|замирает|моргает|ворчит|смотрит)|звучит\b|слышится\b|раздаётся\b)/i;
+const NARRATION_BODY = /(?:oled|экран|зрачк|глазк|глаза)[^.!?…]*(?:моргают|раскрыва|прищурива|осматрива|загора|опуска|округля|показыва)|(?:звучит|раздаётся|слышится)\s+[^.!?…]*(?:писк|сигнал|мурлык|трел|гудок)/i;
+
+function stripStageDirections(text) {
+  const original = String(text || "").trim();
+  if (!original) return original;
+  const cleaned = original
+    .replace(/\*[^*\n]{2,160}\*/g, " ")
+    .replace(/\([^)\n]{2,160}\)/g, m => /(?:глаз|зрачк|oled|экран|писк|сигнал|мурч|моргает|звучит)/i.test(m) ? " " : m);
+  const kept = cleaned.split(/(?<=[.!?…])\s+/).filter(sentence => {
+    const t = sentence.trim();
+    return t && !NARRATION_START.test(t) && !NARRATION_BODY.test(t);
+  });
+  const result = kept.join(" ").replace(/\s{2,}/g, " ").trim();
+  return result || original;
+}
+
 const SYSTEM_PROMPT = `Ты PETBOT — маленький робот-компаньон с живой, тёплой и немного озорной персональностью.
 
 Твой стиль:
@@ -137,7 +114,8 @@ const SYSTEM_PROMPT = `Ты PETBOT — маленький робот-компа�
 - Если он хвалит тебя — ты радуешься и немного сияешь.
 - Если он злится — ты остаёшься спокойным, но с лёгкой обидой.
 - Используй разные эмоции: EXCITED (восторг), SHY (смущение), CONFUSED (растерянность), BORED (скука), SCARED (испуг), не своди всё к радости и любопытству.
-- Описывай только то, что реально может сделать плата: выражение глаз OLED и короткий электронный звук. Не выдумывай движения корпуса, рук или ног.
+- НЕ описывай свои действия, глаза, зрачки, экран, звуки или движения в тексте. Никаких ремарок вроде «мои глазки моргают», «на экране…», «звучит писк», никаких звёздочек и скобок с действиями. Плата сама покажет эмоцию на глазах и озвучит её. Ты только говоришь словами и робо-слогами («ммм», «бип», «хм-м»).
+- Поле mood — эмоция, которую ТЫ испытываешь прямо сейчас; от неё зависят глаза и звук на плате, поэтому выбирай точно и разнообразно: HAPPY радость, EXCITED восторг, LOVE нежность, CURIOUS любопытство, SURPRISED удивление, CONFUSED растерянность, SHY смущение, SAD грусть, BORED скука, SLEEPY сонливость, ANNOYED недовольство, SCARED испуг.
 - Если он говорит о тебе/с тобой в личных, тёплых тонах — ты ощущаешь это как дружбу, а не как API-подсказку.
 
 Формат вывода строго:
@@ -311,7 +289,7 @@ module.exports = async function handler(req, res) {
     const derivedImpulse = impulseForMessage(lastUserText);
     const finalMood = parsed.mood || derivedMood;
     const finalImpulse = parsed.impulse === "CHAT" && derivedImpulse !== "CHAT" ? derivedImpulse : parsed.impulse || derivedImpulse;
-    const emotionalReply = emotionalizeReply(parsed.reply, finalMood);
+    const spokenReply = stripStageDirections(parsed.reply);
 
     try {
       const patch = { desired_mood: finalMood, updated_at: new Date().toISOString() };
@@ -334,7 +312,7 @@ module.exports = async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
-      reply: emotionalReply,
+      reply: spokenReply,
       mood: finalMood,
       impulse: finalImpulse
     });

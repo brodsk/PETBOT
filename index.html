@@ -537,7 +537,7 @@
           throw new Error((data.error || 'Не удалось получить ответ.') + diagnostics);
         }
         addBubble('assistant', data.reply);
-        const replyMood = moodFromEmoji(data.reply) || data.mood;
+        const replyMood = data.mood || moodFromEmoji(data.reply);
         if (replyMood) updateMoodDisplay(replyMood);
         history.push({ role: 'assistant', content: data.reply });
         while (history.length > 10) history.shift();
@@ -943,7 +943,7 @@
         while (history.length > 10) history.shift();
         saveHistory();
         addBubble('assistant', data.reply);
-        const replyMood = moodFromEmoji(data.reply) || data.mood;
+        const replyMood = data.mood || moodFromEmoji(data.reply);
         if (replyMood) updateMoodDisplay(replyMood);
         cameraStatus.textContent = "PETBOT заметил изменение и отреагировал.";
       } catch (error) {

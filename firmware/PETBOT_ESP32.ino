@@ -11,13 +11,14 @@
 #include <Preferences.h>
 #include <WiFiManager.h>
 #include <HTTPClient.h>
+#include <freertos/semphr.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.3.0";
+const char* FIRMWARE_VERSION = "petbot-3.4.0";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -60,6 +61,10 @@ float gazeY = 0.0f;
 float gazeTargetX = 0.0f;
 float gazeTargetY = 0.0f;
 bool eyesOpen = true;
+bool blinking = false;             // non-blocking blink state (see loop)
+unsigned long blinkUntil = 0;
+String lastDrawnMood = "";         // detects emotion changes for the onset "pop"
+unsigned long moodChangedAt = 0;
 bool displayReady = false;
 unsigned long lastSoundSample = 0;
 unsigned long lastInteractionAt = 0;
@@ -168,11 +173,11 @@ uint8_t voiceCodeForMood(const String& m) {
   if (m == "ANNOYED") return 5;
   if (m == "SLEEPY") return 6;
   if (m == "SAD") return 7;
-  if (m == "EXCITED") return 1;
-  if (m == "SHY") return 4;
-  if (m == "CONFUSED") return 2;
-  if (m == "BORED") return 6;
-  if (m == "SCARED") return 3;
+  if (m == "EXCITED") return 9;
+  if (m == "SHY") return 10;
+  if (m == "CONFUSED") return 11;
+  if (m == "BORED") return 12;
+  if (m == "SCARED") return 13;
   return 8;
 }
 
@@ -246,6 +251,36 @@ static void buildVoice(uint8_t code, bool idle) {
       vAdd(1300, 800, idle ? 260 : 420, VM_VIBRATO);
       if (!idle) { vRest(90); vAdd(1000, 520, 380, VM_BURBLE); }
       else { vRest(40); vAdd(600, 400, 240, VM_PURR); }
+      break;
+    case 9:  // EXCITED: fast rising triple chirp and a high trill
+      if (idle) { vAdd(1800, 2800, 60, VM_CHIRP); vRest(20); vAdd(2000, 3000, 60, VM_CHIRP); break; }
+      vAdd(1500, 2600, 55, VM_CHIRP); vRest(20);
+      vAdd(1800, 2900, 55, VM_CHIRP); vRest(20);
+      vAdd(2100, 3100, 70, VM_GLIDE);
+      vAdd(2800, 2800, r == 1 ? 260 : 170, VM_TRILL);
+      break;
+    case 10:  // SHY: soft hesitant coo, a pause, a smaller coo
+      if (idle) { vAdd(1100, 1300, 140, VM_VIBRATO); break; }
+      vAdd(1000, 1300, 120, VM_VIBRATO); vRest(130);
+      vAdd(1250, 1050, 170, VM_VIBRATO);
+      if (r == 2) { vRest(90); vAdd(1000, 1150, 100, VM_BURBLE); }
+      break;
+    case 11:  // CONFUSED: "hm? hmm?" wobbles that end on a rising question
+      if (idle) { vAdd(1000, 1400, 120, VM_VIBRATO); break; }
+      vAdd(900, 1100, 130, VM_VIBRATO); vRest(60);
+      vAdd(1200, 900, 100, VM_GLIDE); vRest(50);
+      vAdd(900, 1700, 190, VM_GLIDE);
+      break;
+    case 12:  // BORED: a long sigh
+      if (idle) { vAdd(900, 600, 300, VM_VIBRATO); break; }
+      vAdd(1300, 650, 700, VM_VIBRATO);
+      if (r == 3) { vRest(120); vAdd(700, 520, 260, VM_PURR); }
+      break;
+    case 13:  // SCARED: trembling squeal, a gulp of silence, a shaky whimper
+      if (idle) { vAdd(2300, 2800, 120, VM_TRILL); break; }
+      vAdd(2200, 3000, 70, VM_GLIDE);
+      vAdd(3000, 3000, 260, VM_TRILL); vRest(70);
+      vAdd(2400, 2000, 160, VM_TRILL);
       break;
     default:
       vAdd(1200, 1200, 55, VM_BURBLE);
@@ -410,6 +445,16 @@ String jsonStringField(const String& json, const String& key) {
 void drawFace() {
   if (!displayReady) return;
 
+  const unsigned long t = millis();
+  if (mood != lastDrawnMood) {
+    lastDrawnMood = mood;
+    moodChangedAt = t;
+  }
+  // 1.0 right after an emotion starts, fading to 0 in half a second: every
+  // new emotion "pops" instead of just swapping pictures.
+  const float age = (float)(t - moodChangedAt);
+  const float onset = age < 500.0f ? 1.0f - age / 500.0f : 0.0f;
+
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
@@ -441,108 +486,190 @@ void drawFace() {
     return;
   }
 
-  const int leftX = 37;
-  const int rightX = 91;
-  const int eyeY = 34;
+  // ---- body language: bounce, tremble, sway, droop ----
+  float bobY = 0.0f, swayX = 0.0f;
+  if (mood == "EXCITED") bobY = -3.0f * fabsf(sinf(t * 0.011f));
+  else if (mood == "HAPPY") bobY = -1.2f * sinf(t * 0.006f);
+  else if (mood == "LOVE") bobY = -0.8f * sinf(t * 0.007f);
+  else if (mood == "SAD") bobY = 1.0f + 0.8f * sinf(t * 0.0025f);
+  else if (mood == "BORED") bobY = 0.8f * sinf(t * 0.002f);
+  else if (mood == "SCARED") swayX = 1.6f * sinf(t * 0.11f) + 0.8f * sinf(t * 0.23f);
+  else if (mood == "SHY") swayX = 2.0f * sinf(t * 0.0035f);
+
+  const int leftX = 37 + (int)roundf(swayX);
+  const int rightX = 91 + (int)roundf(swayX);
+  const int eyeY = 34 + (int)roundf(bobY);
   const int eyeW = 29;
   const int eyeH = 35;
   const int glanceX = (int)roundf(gazeX);
   const int glanceY = (int)roundf(gazeY);
-  const bool excited = microAction == "EXCITED";
-  const bool wideEyes = microAction == "WIDE_EYES";
+  const bool excitedAction = microAction == "EXCITED";
   const bool squint = microAction == "SQUINT";
-  const bool happy = mood == "HAPPY" || mood == "EXCITED" || excited;
-  const bool sleepy = !eyesOpen || mood == "SLEEPY" || mood == "BORED";
+  const bool happy = mood == "HAPPY" || excitedAction;
   const bool annoyed = mood == "ANNOYED" || squint;
-  const bool sad = mood == "SAD";
-  const bool shy = mood == "SHY";
-  const bool confused = mood == "CONFUSED";
-  const bool scared = mood == "SCARED";
+  const bool alreadyClosedLook = mood == "HAPPY" || mood == "SHY" || mood == "SLEEPY" || excitedAction;
+  const bool sleepy = !eyesOpen || mood == "SLEEPY";
+  const bool lidsDown = sleepy || (blinking && !alreadyClosedLook);
 
-  // Extra life: pupils and eye shapes drift slightly even while the robot is idle,
-  // so the face does not look rigid or static.
-  const float lifeWaveX = 0.8f * sinf(millis() * 0.008f + 0.7f);
-  const float lifeWaveY = 0.7f * cosf(millis() * 0.01f + 1.3f);
+  // Extra life: pupils drift slightly even while the robot is idle.
+  const float lifeWaveX = 0.8f * sinf(t * 0.008f + 0.7f);
+  const float lifeWaveY = 0.7f * cosf(t * 0.01f + 1.3f);
   const int pupilDriftX = (int)roundf(glanceX + lifeWaveX);
   const int pupilDriftY = (int)roundf(glanceY + lifeWaveY);
+  const int eyeCx[2] = {leftX, rightX};
 
-  if (sleepy) {
-    display.fillRoundRect(leftX - eyeW/2, eyeY - 4, eyeW, 9, 4, SSD1306_WHITE);
-    display.fillRoundRect(rightX - eyeW/2, eyeY - 4, eyeW, 9, 4, SSD1306_WHITE);
-    display.drawLine(leftX - 8, eyeY + 9, leftX + 8, eyeY + 9, SSD1306_WHITE);
-    display.drawLine(rightX - 8, eyeY + 9, rightX + 8, eyeY + 9, SSD1306_WHITE);
-  } else if (mood == "LOVE") {
-    // Pixel hearts read clearly on a monochrome screen.
-    for (int i = 0; i < 2; i++) {
-      int cx = i == 0 ? leftX : rightX;
-      cx += glanceX;
-      int cy = eyeY - 2 + glanceY;
-      display.fillCircle(cx - 5, cy - 2, 5, SSD1306_WHITE);
-      display.fillCircle(cx + 5, cy - 2, 5, SSD1306_WHITE);
-      display.fillTriangle(cx - 10, cy, cx + 10, cy, cx, cy + 13, SSD1306_WHITE);
+  if (lidsDown) {
+    // Closed eyes: a breathing line while asleep, a quick shutter for a blink.
+    const int bh = (mood == "SLEEPY") ? 8 + (int)roundf(1.5f * sinf(t * 0.003f)) : 7;
+    for (int i = 0; i < 2; i++) display.fillRoundRect(eyeCx[i] - eyeW / 2, eyeY - bh / 2, eyeW, bh, 3, SSD1306_WHITE);
+    if (mood == "SLEEPY") {
+      const int phase = (int)((t / 650UL) % 4UL);  // z, then Z, drifting up
+      if (phase >= 1) { display.setCursor(108, 21); display.print("z"); }
+      if (phase >= 2) { display.setCursor(114, 12); display.print("Z"); }
     }
-  } else if (sad) {
-    display.fillRoundRect(leftX - 14, eyeY - 12, 28, 27, 10, SSD1306_WHITE);
-    display.fillRoundRect(rightX - 14, eyeY - 12, 28, 27, 10, SSD1306_WHITE);
-    display.fillRect(leftX - 15, eyeY - 13, 30, 9, SSD1306_BLACK);
-    display.fillRect(rightX - 15, eyeY - 13, 30, 9, SSD1306_BLACK);
-    display.fillCircle(leftX + pupilDriftX, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
-    display.fillCircle(rightX + pupilDriftX, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
+  } else if (mood == "BORED") {
+    // Heavy lids, a slow side-to-side stare.
+    const int gx = (int)roundf(6.0f * sinf(t * 0.0012f));
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.fillRoundRect(ex - eyeW / 2, eyeY - 14, eyeW, 28, 10, SSD1306_WHITE);
+      display.fillCircle(ex + gx, eyeY + 5, 6, SSD1306_BLACK);
+      display.fillRect(ex - eyeW / 2 - 1, eyeY - 16, eyeW + 2, 17, SSD1306_BLACK);
+      display.drawLine(ex - 13, eyeY - 4, ex + 13, eyeY - 4, SSD1306_WHITE);
+    }
+  } else if (mood == "LOVE") {
+    // Pixel hearts that beat; a tiny heart floats up between the eyes.
+    const float pulse = 1.0f + 0.14f * sinf(t * 0.014f) + onset * 0.25f;
+    const int r = (int)roundf(5.0f * pulse);
+    for (int i = 0; i < 2; i++) {
+      const int cx = eyeCx[i] + glanceX;
+      const int cy = eyeY - 2 + glanceY;
+      display.fillCircle(cx - r, cy - 2, r, SSD1306_WHITE);
+      display.fillCircle(cx + r, cy - 2, r, SSD1306_WHITE);
+      display.fillTriangle(cx - 2 * r, cy, cx + 2 * r, cy, cx, cy + (int)roundf(13.0f * pulse), SSD1306_WHITE);
+    }
+    const int hy = 45 - (int)((t % 2400UL) / 80UL);
+    if (hy > 17) {
+      display.fillCircle(62, hy, 2, SSD1306_WHITE);
+      display.fillCircle(66, hy, 2, SSD1306_WHITE);
+      display.fillTriangle(60, hy + 1, 68, hy + 1, 64, hy + 6, SSD1306_WHITE);
+    }
+  } else if (mood == "SAD") {
+    // Drooping lids, pupils low, a tear that rolls down.
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.fillRoundRect(ex - 14, eyeY - 12, 28, 27, 10, SSD1306_WHITE);
+      display.fillRect(ex - 15, eyeY - 13, 30, 9, SSD1306_BLACK);
+      display.fillCircle(ex + pupilDriftX, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
+    }
     display.drawLine(leftX - 13, eyeY - 18, leftX + 5, eyeY - 12, SSD1306_WHITE);
     display.drawLine(rightX - 5, eyeY - 12, rightX + 13, eyeY - 18, SSD1306_WHITE);
-  } else if (mood == "SURPRISED" || scared) {
-    display.drawRoundRect(leftX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
-    display.drawRoundRect(rightX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
-    const int pupilSize = scared ? 4 : 7;
-    display.fillCircle(leftX + pupilDriftX, eyeY + pupilDriftY, pupilSize, SSD1306_WHITE);
-    display.fillCircle(rightX + pupilDriftX, eyeY + pupilDriftY, pupilSize, SSD1306_WHITE);
-    display.fillCircle(leftX + pupilDriftX, eyeY + pupilDriftY, 2, SSD1306_BLACK);
-    display.fillCircle(rightX + pupilDriftX, eyeY + pupilDriftY, 2, SSD1306_BLACK);
-    if (scared) {
-      display.drawLine(leftX - 13, eyeY - 21, leftX + 8, eyeY - 16, SSD1306_WHITE);
-      display.drawLine(rightX - 8, eyeY - 16, rightX + 13, eyeY - 21, SSD1306_WHITE);
+    const int tp = (int)(t % 2800UL);
+    if (tp < 1800) {
+      const int ty = eyeY + 11 + tp / 100;
+      if (ty < 62) {
+        display.fillCircle(leftX - 8, ty, 2, SSD1306_WHITE);
+        display.drawPixel(leftX - 8, ty - 3, SSD1306_WHITE);
+      }
     }
-  } else if (confused) {
+  } else if (mood == "SCARED") {
+    // Trembling wide eyes, tiny darting pupils, a sweat drop.
+    const int grow = (int)roundf(onset * 3.0f);
+    const int dart = (int)((t / 220UL) % 3UL) - 1;
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.drawRoundRect(ex - 14 - grow, eyeY - 17 - grow, 28 + 2 * grow, 34 + 2 * grow, 10, SSD1306_WHITE);
+      display.fillCircle(ex + dart * 3, eyeY + pupilDriftY, 3, SSD1306_WHITE);
+    }
+    display.drawLine(leftX - 13, eyeY - 21, leftX + 8, eyeY - 16, SSD1306_WHITE);
+    display.drawLine(rightX - 8, eyeY - 16, rightX + 13, eyeY - 21, SSD1306_WHITE);
+    const int sy = 17 + (int)((t / 180UL) % 5UL);
+    display.fillCircle(rightX + 19, sy, 2, SSD1306_WHITE);
+    display.drawPixel(rightX + 19, sy - 3, SSD1306_WHITE);
+  } else if (mood == "SURPRISED") {
+    // Eyes pop open wide, then settle; pupils start tiny and relax.
+    const int grow = (int)roundf(onset * 4.0f);
+    const int ps = 3 + (int)roundf((1.0f - onset) * 4.0f);
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.drawRoundRect(ex - 14 - grow, eyeY - 17 - grow, 28 + 2 * grow, 34 + 2 * grow, 10 + grow, SSD1306_WHITE);
+      display.fillCircle(ex + pupilDriftX, eyeY + pupilDriftY, ps, SSD1306_WHITE);
+      display.fillCircle(ex + pupilDriftX, eyeY + pupilDriftY, 2, SSD1306_BLACK);
+      display.drawLine(ex - 8, eyeY - 21 - grow / 2, ex + 8, eyeY - 21 - grow / 2, SSD1306_WHITE);
+    }
+  } else if (mood == "CONFUSED") {
+    // Mismatched eyes that look around, and a "?" that bobs.
+    const int sw = (int)roundf(3.0f * sinf(t * 0.004f));
     display.fillRoundRect(leftX - 14, eyeY - 13, 28, 29, 10, SSD1306_WHITE);
     display.fillRoundRect(rightX - 14, eyeY - 18, 28, 34, 10, SSD1306_WHITE);
-    display.fillCircle(leftX + pupilDriftX - 2, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
-    display.fillCircle(rightX + pupilDriftX + 2, eyeY - 2 + pupilDriftY, 5, SSD1306_BLACK);
+    display.fillCircle(leftX + pupilDriftX - 2 + sw, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
+    display.fillCircle(rightX + pupilDriftX + 2 - sw, eyeY - 2 + pupilDriftY, 5, SSD1306_BLACK);
     display.drawLine(leftX - 12, eyeY - 20, leftX + 8, eyeY - 17, SSD1306_WHITE);
     display.drawLine(rightX - 8, eyeY - 22, rightX + 12, eyeY - 16, SSD1306_WHITE);
-  } else if (shy) {
-    display.drawLine(leftX - 13, eyeY + 1, leftX - 6, eyeY - 4, SSD1306_WHITE);
-    display.drawLine(leftX - 6, eyeY - 4, leftX + 2, eyeY + 1, SSD1306_WHITE);
-    display.drawLine(rightX - 13, eyeY + 1, rightX - 6, eyeY - 4, SSD1306_WHITE);
-    display.drawLine(rightX - 6, eyeY - 4, rightX + 2, eyeY + 1, SSD1306_WHITE);
-    display.fillCircle(24, eyeY + 9, 2, SSD1306_WHITE);
-    display.fillCircle(104, eyeY + 9, 2, SSD1306_WHITE);
+    display.setTextSize(2);
+    display.setCursor(110, 14 + (int)roundf(2.0f * sinf(t * 0.006f)));
+    display.print("?");
+    display.setTextSize(1);
+  } else if (mood == "SHY") {
+    // Happy-closed eyes, looking away with a sway, blushing cheeks.
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.drawLine(ex - 12, eyeY + 3, ex, eyeY - 5, SSD1306_WHITE);
+      display.drawLine(ex, eyeY - 5, ex + 12, eyeY + 3, SSD1306_WHITE);
+      display.drawLine(ex - 12, eyeY + 4, ex, eyeY - 4, SSD1306_WHITE);
+      display.drawLine(ex, eyeY - 4, ex + 12, eyeY + 4, SSD1306_WHITE);
+      for (int k = 0; k < 3; k++) {
+        display.drawLine(ex - 9 + k * 6, eyeY + 17, ex - 6 + k * 6, eyeY + 13, SSD1306_WHITE);
+      }
+    }
+  } else if (mood == "EXCITED") {
+    // Huge shining eyes that bounce, with flickering sparkles.
+    const int r = 13 + (int)roundf(onset * 3.0f);
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      const int px = ex + (int)roundf(3.0f * sinf(t * 0.02f + i));
+      const int py = eyeY + (int)roundf(2.0f * cosf(t * 0.017f));
+      display.fillCircle(ex, eyeY, r, SSD1306_WHITE);
+      display.fillCircle(px, py, 8, SSD1306_BLACK);
+      display.fillCircle(px - 3, py - 3, 3, SSD1306_WHITE);
+      display.fillCircle(px + 3, py + 3, 1, SSD1306_WHITE);
+    }
+    const int sp = (int)((t / 150UL) % 4UL);
+    const int sx[3] = {22, 106, 64};
+    const int sy2[3] = {18, 20, 15};
+    for (int k = 0; k < 3; k++) {
+      if (k == sp || k == (sp + 1) % 4) {
+        display.drawLine(sx[k] - 3, sy2[k], sx[k] + 3, sy2[k], SSD1306_WHITE);
+        display.drawLine(sx[k], sy2[k] - 3, sx[k], sy2[k] + 3, SSD1306_WHITE);
+      }
+    }
   } else if (happy) {
     // Happy crescent eyes with a lifted outer corner.
-    display.drawLine(leftX - 13, eyeY + 3, leftX - 7, eyeY - 5, SSD1306_WHITE);
-    display.drawLine(leftX - 7, eyeY - 5, leftX, eyeY - 8, SSD1306_WHITE);
-    display.drawLine(leftX, eyeY - 8, leftX + 7, eyeY - 5, SSD1306_WHITE);
-    display.drawLine(leftX + 7, eyeY - 5, leftX + 13, eyeY + 3, SSD1306_WHITE);
-    display.drawLine(rightX - 13, eyeY + 3, rightX - 7, eyeY - 5, SSD1306_WHITE);
-    display.drawLine(rightX - 7, eyeY - 5, rightX, eyeY - 8, SSD1306_WHITE);
-    display.drawLine(rightX, eyeY - 8, rightX + 7, eyeY - 5, SSD1306_WHITE);
-    display.drawLine(rightX + 7, eyeY - 5, rightX + 13, eyeY + 3, SSD1306_WHITE);
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.drawLine(ex - 13, eyeY + 3, ex - 7, eyeY - 5, SSD1306_WHITE);
+      display.drawLine(ex - 7, eyeY - 5, ex, eyeY - 8, SSD1306_WHITE);
+      display.drawLine(ex, eyeY - 8, ex + 7, eyeY - 5, SSD1306_WHITE);
+      display.drawLine(ex + 7, eyeY - 5, ex + 13, eyeY + 3, SSD1306_WHITE);
+    }
   } else {
-    int top = eyeY - eyeH/2;
+    // CURIOUS / ANNOYED / neutral. Curious eyes rock like a tilting head.
+    const int tilt = (mood == "CURIOUS") ? (int)roundf(2.5f * sinf(t * 0.0021f)) : 0;
+    int top = eyeY - eyeH / 2;
     int height = eyeH;
     if (annoyed) { top += 5; height -= 7; }
-    display.fillRoundRect(leftX - eyeW/2, top, eyeW, height, 11, SSD1306_WHITE);
-    display.fillRoundRect(rightX - eyeW/2, top, eyeW, height, 11, SSD1306_WHITE);
+    display.fillRoundRect(leftX - eyeW / 2, top + tilt, eyeW, height, 11, SSD1306_WHITE);
+    display.fillRoundRect(rightX - eyeW / 2, top - tilt, eyeW, height, 11, SSD1306_WHITE);
 
     int pupilY = eyeY + pupilDriftY;
-    int pupilLX = leftX + 2 + pupilDriftX;
-    int pupilRX = rightX + 2 + pupilDriftX;
     if (mood == "CURIOUS") pupilY -= 4;
     if (annoyed) pupilY += 4;
-    display.fillCircle(pupilLX, pupilY, 6, SSD1306_BLACK);
-    display.fillCircle(pupilRX, pupilY, 6, SSD1306_BLACK);
-    // Tiny white catchlights make the eyes feel alive.
-    display.fillCircle(pupilLX - 2, pupilY - 2, 2, SSD1306_WHITE);
-    display.fillCircle(pupilRX - 2, pupilY - 2, 2, SSD1306_WHITE);
+    const int pupilLX = leftX + 2 + pupilDriftX;
+    const int pupilRX = rightX + 2 + pupilDriftX;
+    display.fillCircle(pupilLX, pupilY + tilt, 6, SSD1306_BLACK);
+    display.fillCircle(pupilRX, pupilY - tilt, 6, SSD1306_BLACK);
+    display.fillCircle(pupilLX - 2, pupilY + tilt - 2, 2, SSD1306_WHITE);
+    display.fillCircle(pupilRX - 2, pupilY - tilt - 2, 2, SSD1306_WHITE);
 
     if (annoyed) {
       display.drawLine(leftX - 13, eyeY - 17, leftX + 7, eyeY - 12, SSD1306_WHITE);
@@ -550,27 +677,42 @@ void drawFace() {
     }
   }
 
-  // Tiny mouth glyph adds character without cluttering the display.
+  // Mouth: every emotion has its own.
   const int mouthY = 56;
-  if (happy || mood == "LOVE" || shy) {
+  if (lidsDown) {
+    if (mood == "SLEEPY") display.drawCircle(64, mouthY, 1, SSD1306_WHITE);
+  } else if (mood == "EXCITED") {
+    display.fillCircle(64, mouthY - 2, 5, SSD1306_WHITE);
+    display.fillRect(58, mouthY - 8, 13, 6, SSD1306_BLACK);
+  } else if (happy || mood == "LOVE" || mood == "SHY") {
     display.drawLine(59, mouthY - 1, 64, mouthY + 2, SSD1306_WHITE);
     display.drawLine(64, mouthY + 2, 69, mouthY - 1, SSD1306_WHITE);
+  } else if (mood == "SCARED") {
+    display.drawLine(56, mouthY, 60, mouthY - 3, SSD1306_WHITE);
+    display.drawLine(60, mouthY - 3, 64, mouthY + 1, SSD1306_WHITE);
+    display.drawLine(64, mouthY + 1, 68, mouthY - 3, SSD1306_WHITE);
+    display.drawLine(68, mouthY - 3, 72, mouthY, SSD1306_WHITE);
+  } else if (mood == "SURPRISED") {
+    display.drawCircle(64, mouthY, 3, SSD1306_WHITE);
   } else if (annoyed) {
     display.drawLine(60, mouthY, 68, mouthY - 2, SSD1306_WHITE);
-  } else if (mood == "SURPRISED" || scared) {
-    display.drawCircle(64, mouthY, scared ? 4 : 3, SSD1306_WHITE);
-  } else if (confused) {
+  } else if (mood == "CONFUSED") {
     display.drawLine(60, mouthY, 64, mouthY - 2, SSD1306_WHITE);
     display.drawLine(64, mouthY - 2, 68, mouthY + 1, SSD1306_WHITE);
-  } else if (sad) {
+  } else if (mood == "SAD") {
     display.drawLine(58, mouthY + 2, 64, mouthY - 2, SSD1306_WHITE);
     display.drawLine(64, mouthY - 2, 70, mouthY + 2, SSD1306_WHITE);
-  } else if (!sleepy) {
+  } else if (mood == "BORED") {
+    display.drawLine(58, mouthY + 1, 70, mouthY + 1, SSD1306_WHITE);
+  } else if (mood == "CURIOUS") {
+    display.drawCircle(64, mouthY, 2, SSD1306_WHITE);
+  } else {
     display.drawLine(61, mouthY, 67, mouthY, SSD1306_WHITE);
   }
 
   display.display();
 }
+
 bool cloudRequest(
     const char* path,
     const String& method,
@@ -612,7 +754,7 @@ bool cloudRequest(
   return ok;
 }
 
-void sendHeartbeat() {
+String buildHeartbeatBody() {
   String body =
       "{\"firmware\":\"" + String(FIRMWARE_VERSION) +
       "\",\"wifi_rssi\":" + String(WiFi.RSSI()) +
@@ -631,9 +773,62 @@ void sendHeartbeat() {
       "\"camera_connected\":false,"
       "\"motors_enabled\":false}";
 
-  if (cloudRequest(
-          "/api/device/heartbeat", "POST", body, nullptr)) {
-    Serial.println("PETBOT heartbeat OK");
+  return body;
+}
+
+// ---------------------------------------------------------------------------
+// Cloud I/O lives in its own task. An HTTPS request takes hundreds of
+// milliseconds; run from loop() it froze the face every few seconds. Now the
+// task only fetches / posts, and loop() consumes the result, so the animation
+// never stalls. After any cloud event it polls every 1.5 s for a minute so a
+// conversation feels immediate; otherwise every 5 s to stay inside free-tier
+// limits.
+// ---------------------------------------------------------------------------
+SemaphoreHandle_t cloudMutex = nullptr;
+String cloudInbox;                  // latest /poll response (written by cloudTask)
+volatile bool cloudInboxReady = false;
+String cloudOutbox;                 // heartbeat body (written by loop)
+volatile bool cloudOutboxReady = false;
+volatile unsigned long cloudFastPollUntil = 0;
+
+void sendHeartbeat() {
+  if (!cloudMutex) return;
+  String body = buildHeartbeatBody();
+  xSemaphoreTake(cloudMutex, portMAX_DELAY);
+  cloudOutbox = body;
+  cloudOutboxReady = true;
+  xSemaphoreGive(cloudMutex);
+}
+
+void cloudTask(void*) {
+  unsigned long lastPollAt = 0;
+  for (;;) {
+    if (WiFi.status() != WL_CONNECTED) { delay(500); continue; }
+
+    if (cloudOutboxReady) {
+      String body;
+      xSemaphoreTake(cloudMutex, portMAX_DELAY);
+      body = cloudOutbox;
+      cloudOutboxReady = false;
+      xSemaphoreGive(cloudMutex);
+      if (cloudRequest("/api/device/heartbeat", "POST", body, nullptr)) {
+        Serial.println("PETBOT heartbeat OK");
+      }
+    }
+
+    const unsigned long now = millis();
+    const unsigned long every = ((long)(now - cloudFastPollUntil) < 0) ? 1500UL : 5000UL;
+    if (!cloudInboxReady && now - lastPollAt >= every) {
+      lastPollAt = now;
+      String response;
+      if (cloudRequest("/api/device/poll", "GET", "", &response)) {
+        xSemaphoreTake(cloudMutex, portMAX_DELAY);
+        cloudInbox = response;
+        cloudInboxReady = true;
+        xSemaphoreGive(cloudMutex);
+      }
+    }
+    delay(40);
   }
 }
 
@@ -677,13 +872,7 @@ void applyChatEvent(String face, String impulse, bool faceAlreadyApplied) {
   Serial.println("Chat event: " + face + " / " + impulse);
 }
 
-void pollCloud() {
-  String response;
-
-  if (!cloudRequest(
-          "/api/device/poll", "GET", "", &response)) {
-    return;
-  }
+void handlePollResponse(const String& response) {
 
   // The cloud can send either "mood" or "emotion". Prefer an explicit
   // emotion so chat replies can drive the face without a separate button.
@@ -718,6 +907,7 @@ void pollCloud() {
 
   String command = jsonStringField(response, "command");
   command.toUpperCase();
+  if (command.length() || moodAppliedNow) cloudFastPollUntil = millis() + 60000UL;
 
   if (command == "CHAT_EVENT") {
     applyChatEvent(jsonStringField(response, "face"),
@@ -1136,6 +1326,22 @@ void updatePhysicalInput() {
   }
 }
 
+static unsigned long blinkGapFor(const String& m) {
+  if (m == "EXCITED") return 900UL + (esp_random() % 1400UL);
+  if (m == "SCARED") return 3500UL + (esp_random() % 3000UL);
+  if (m == "SLEEPY" || m == "BORED") return 2600UL + (esp_random() % 3200UL);
+  if (m == "SURPRISED") return 2800UL + (esp_random() % 2500UL);
+  return 1200UL + (esp_random() % 2200UL);
+}
+
+static unsigned long blinkLengthFor(const String& m) {
+  if (m == "SLEEPY") return 380UL;
+  if (m == "BORED") return 280UL;
+  if (m == "SCARED") return 70UL;
+  if (m == "EXCITED") return 90UL;
+  return 130UL;
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PETBOT_PIEZO_PIN, OUTPUT);
@@ -1245,7 +1451,11 @@ String chooseAutonomousMood(const String& current) {
   if (petEnergy < 14 || idleFor > 120000UL) return "SLEEPY";
   const uint32_t roll = esp_random() % 100;
 
+  if (petConfidence < 18 && petStimulation >= 55) return roll < 60 ? "SCARED" : "ANNOYED";
+  if (petStimulation >= 60 && petMoodValue >= 55) return roll < 60 ? "EXCITED" : "HAPPY";
   if (petStimulation >= 72) return roll < 72 ? "SURPRISED" : "CURIOUS";
+  if (petAttachment < 25 && idleFor < 20000UL && roll < 30) return "SHY";
+  if (petStimulation < 30 && idleFor > 30000UL && idleFor <= 120000UL) return roll < 55 ? "BORED" : "CURIOUS";
   if (petSocialNeed >= 78 && idleFor > 45000UL) {
     if (petAttachment >= 35 && petMoodValue >= 35) return roll < 62 ? "LOVE" : "SAD";
     return roll < 72 ? "SAD" : "CURIOUS";
@@ -1256,7 +1466,7 @@ String chooseAutonomousMood(const String& current) {
   if (petCuriosity >= 68) return roll < 58 ? "CURIOUS" : roll < 82 ? "SURPRISED" : "HAPPY";
   if (petMoodValue >= 72 && petSocialNeed < 55) return roll < 55 ? "HAPPY" : "CURIOUS";
 
-  String next = roll < 48 ? "CURIOUS" : roll < 78 ? "HAPPY" : "SURPRISED";
+  String next = roll < 44 ? "CURIOUS" : roll < 72 ? "HAPPY" : roll < 90 ? "SURPRISED" : "CONFUSED";
   if (next == current) next = current == "CURIOUS" ? "HAPPY" : "CURIOUS";
   return next;
 }
@@ -1376,7 +1586,7 @@ void updateAutonomousMood() {
       if (idleFor > 120000UL) {
         next = "SLEEPY";
       } else if (idleFor > 60000UL) {
-        next = petMoodValue > 30 ? "SAD" : "SLEEPY";
+        next = petMoodValue > 30 ? "BORED" : "SLEEPY";
       } else if (idleFor < 15000UL && next == "SLEEPY") {
         next = "CURIOUS";
       }
@@ -1412,7 +1622,7 @@ void updateAutonomousMood() {
         next = "SLEEPY";
       } else if (idleFor > 60000UL) {
         // A distinct bored phase between active exploration and sleep.
-        next = petMoodValue > 30 ? "SAD" : "SLEEPY";
+        next = petMoodValue > 30 ? "BORED" : "SLEEPY";
       } else if (idleFor < 15000UL && next == "SLEEPY") {
         next = "CURIOUS";
       }
@@ -1439,6 +1649,12 @@ void updateAutonomousMood() {
 }
 
 void loop() {
+  static bool cloudTaskStarted = false;
+  if (!cloudTaskStarted) {
+    cloudTaskStarted = true;
+    cloudMutex = xSemaphoreCreateMutex();
+    xTaskCreatePinnedToCore(cloudTask, "petbot_cloud", 10240, NULL, 1, NULL, 0);
+  }
   handleSerialProvisioning();
   if (notificationMessage.length() && (long)(millis() - notificationUntil) >= 0) {
     notificationMessage = "";
@@ -1459,9 +1675,14 @@ void loop() {
       WiFi.reconnect();
     }
   } else {
-    if (millis() - lastPoll >= 5000UL) {
-      lastPoll = millis();
-      pollCloud();
+    // Network I/O happens in cloudTask; here we only consume what it fetched.
+    if (cloudInboxReady) {
+      String response;
+      xSemaphoreTake(cloudMutex, portMAX_DELAY);
+      response = cloudInbox;
+      cloudInboxReady = false;
+      xSemaphoreGive(cloudMutex);
+      handlePollResponse(response);
     }
 
     if (millis() - lastHeartbeat >= 15000UL) {
@@ -1470,18 +1691,29 @@ void loop() {
     }
   }
 
-  if (nextBlinkAt == 0) nextBlinkAt = millis() + 1200UL;
-  if ((long)(millis() - nextBlinkAt) >= 0) {
-    lastBlink = millis();
-    nextBlinkAt = millis() + 1200UL + (esp_random() % 2200UL);
+  // Non-blocking blink with a rhythm that depends on the emotion.
+  const unsigned long nowB = millis();
+  if (blinking) {
+    if ((long)(nowB - blinkUntil) >= 0) blinking = false;
+  } else {
+    if (nextBlinkAt == 0) nextBlinkAt = nowB + 1200UL;
+    if ((long)(nowB - nextBlinkAt) >= 0) {
+      blinking = true;
+      lastBlink = nowB;
+      blinkUntil = nowB + blinkLengthFor(mood);
+      nextBlinkAt = nowB + blinkGapFor(mood);
+    }
+  }
 
-    eyesOpen = false;
-    drawFace();
-    delay(130);
+  // Closed eyes only belong to sleep; any other emotion wakes them up again.
+  if (mood != "SLEEPY") eyesOpen = true;
 
-    eyesOpen = true;
+  // ~15 fps: continuous animation (bounce, tremble, tears, sparkles).
+  static unsigned long lastFrameAt = 0;
+  if (nowB - lastFrameAt >= 66UL) {
+    lastFrameAt = nowB;
     drawFace();
   }
 
-  delay(20);
+  delay(8);
 }
