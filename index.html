@@ -639,13 +639,11 @@
           voiceEnabled = false;
           if (recognition) { try { recognition.stop(); } catch (_) {} }
           if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
-          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-          isSpeaking = false;
           if (voiceToggle) {
             voiceToggle.textContent = '🎙 Микрофон';
             voiceToggle.setAttribute('aria-pressed', 'false');
           }
-          if (voiceStatus) voiceStatus.textContent = 'Микрофон и озвучивание выключены.';
+          if (voiceStatus) voiceStatus.textContent = 'Микрофон выключен.';
         }
         endCall.textContent = '✓ Звонок завершён';
         endCall.title = 'Видео и микрофон выключены';
@@ -680,7 +678,7 @@
     let faceSeen = false;
     let lastFaceMoodAt = 0;
     let voiceSubmitting = false;
-    let isSpeaking = false;
+
     let recognitionRestartTimer = null;
     let lastVoiceText = '';
     let lastVoiceTextAt = 0;
@@ -809,35 +807,17 @@
     }, true);
 
     function startRecognitionSafely() {
-      if (!recognition || !voiceEnabled || isSpeaking || voiceSubmitting) return;
+      if (!recognition || !voiceEnabled || voiceSubmitting) return;
       if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
       recognitionRestartTimer = setTimeout(() => {
-        if (!voiceEnabled || isSpeaking) return;
+        if (!voiceEnabled || voiceSubmitting) return;
         try { recognition.start(); } catch (_) {}
       }, 350);
     }
 
-    function speakReply(text) {
-      if (!('speechSynthesis' in window) || !text || !voiceEnabled) return;
-      if (recognition) {
-        try { recognition.stop(); } catch (_) {}
-      }
-      if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
-      window.speechSynthesis.cancel();
-      isSpeaking = true;
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ru-RU';
-      utterance.rate = 1.02;
-      utterance.onend = utterance.onerror = () => {
-        isSpeaking = false;
-        startRecognitionSafely();
-      };
-      window.speechSynthesis.speak(utterance);
-    }
-
     function submitVoiceText(text) {
       const cleaned = String(text || "").trim();
-      if (!cleaned || voiceSubmitting || isSpeaking) return;
+      if (!cleaned || voiceSubmitting) return;
       const now = Date.now();
       if (cleaned.toLowerCase() === lastVoiceText.toLowerCase() && now - lastVoiceTextAt < 5000) return;
       lastVoiceText = cleaned;
@@ -852,14 +832,8 @@
     }
 
     if (!SpeechRecognition) {
-      voiceStatus.textContent = 'Голосовой ввод не поддерживается этим браузером. Озвучивание ответов всё ещё доступно.';
-      voiceToggle.addEventListener('click', () => {
-        voiceEnabled = !voiceEnabled;
-        voiceToggle.textContent = voiceEnabled ? '🔊 Голос включён' : '🎙 Микрофон';
-        voiceToggle.setAttribute('aria-pressed', String(voiceEnabled));
-        voiceStatus.textContent = voiceEnabled ? 'Озвучивание ответов включено. Голосовой ввод в этом браузере недоступен.' : 'Озвучивание ответов выключено.';
-        if (!voiceEnabled && 'speechSynthesis' in window) window.speechSynthesis.cancel();
-      });
+      voiceStatus.textContent = 'Голосовой ввод не поддерживается этим браузером. Используй текстовый чат.';
+      voiceToggle.disabled = true;
     } else {
       recognition = new SpeechRecognition();
       recognition.lang = 'ru-RU';
@@ -883,9 +857,8 @@
         voiceStatus.textContent = event.error === 'not-allowed' ? 'Нет доступа к микрофону. Разреши его в настройках сайта.' : 'Ошибка микрофона: ' + event.error;
       };
       recognition.onend = () => {
-        if (voiceEnabled && !isSpeaking) {
-          startRecognitionSafely();
-        } else if (!voiceEnabled) {
+        if (voiceEnabled) startRecognitionSafely();
+        else {
           voiceToggle.textContent = 'Включить микрофон';
           voiceToggle.setAttribute('aria-pressed', 'false');
         }
@@ -893,14 +866,13 @@
       voiceToggle.addEventListener('click', () => {
         if (!recognition) return;
         voiceEnabled = !voiceEnabled;
-        if (voiceEnabled && !('speechSynthesis' in window)) voiceStatus.textContent = 'Ввод речи доступен, но браузер не поддерживает озвучивание.';
         if (voiceEnabled) {
+          voiceStatus.textContent = 'Слушаю. Ответы будут отображаться в чате, PETBOT реагирует глазами и звуками.';
           try { recognition.start(); }
           catch (_) { voiceStatus.textContent = 'Не удалось запустить микрофон. Нажми ещё раз.'; voiceEnabled = false; }
         } else {
           recognition.stop();
-          if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-          voiceStatus.textContent = 'Микрофон и озвучивание выключены.';
+          voiceStatus.textContent = 'Микрофон выключен.';
           voiceToggle.textContent = 'Включить микрофон';
           voiceToggle.setAttribute('aria-pressed', 'false');
         }
@@ -909,9 +881,7 @@
         voiceEnabled = false;
         if (recognition) recognition.stop();
         if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
-        isSpeaking = false;
-        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-        voiceStatus.textContent = 'Микрофон и озвучивание остановлены.';
+        voiceStatus.textContent = 'Микрофон остановлен.';
         voiceToggle.textContent = 'Включить микрофон';
         voiceToggle.setAttribute('aria-pressed', 'false');
       });
@@ -1070,13 +1040,6 @@
     });
 
 
-    // Speech output is opt-in: responses are spoken only while voice mode is on.
-    const originalAddBubble = addBubble;
-    addBubble = function(role, text) {
-      originalAddBubble(role, text);
-      if (role === 'assistant' && voiceEnabled) speakReply(text);
-    };
-
     window.addEventListener('pagehide', () => {
       voiceEnabled = false;
       if (recognition) recognition.stop();
@@ -1084,8 +1047,6 @@
       if (faceTimer) clearInterval(faceTimer);
       if (visionTimer) clearInterval(visionTimer);
       if (recognitionRestartTimer) clearTimeout(recognitionRestartTimer);
-      isSpeaking = false;
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     });
     restoreHistory();
     document.getElementById('refresh').addEventListener('click', checkApi);
