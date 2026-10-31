@@ -168,6 +168,11 @@ uint8_t voiceCodeForMood(const String& m) {
   if (m == "ANNOYED") return 5;
   if (m == "SLEEPY") return 6;
   if (m == "SAD") return 7;
+  if (m == "EXCITED") return 1;
+  if (m == "SHY") return 4;
+  if (m == "CONFUSED") return 2;
+  if (m == "BORED") return 6;
+  if (m == "SCARED") return 3;
   return 8;
 }
 
@@ -446,10 +451,13 @@ void drawFace() {
   const bool excited = microAction == "EXCITED";
   const bool wideEyes = microAction == "WIDE_EYES";
   const bool squint = microAction == "SQUINT";
-  const bool happy = mood == "HAPPY" || excited;
-  const bool sleepy = !eyesOpen || mood == "SLEEPY";
+  const bool happy = mood == "HAPPY" || mood == "EXCITED" || excited;
+  const bool sleepy = !eyesOpen || mood == "SLEEPY" || mood == "BORED";
   const bool annoyed = mood == "ANNOYED" || squint;
   const bool sad = mood == "SAD";
+  const bool shy = mood == "SHY";
+  const bool confused = mood == "CONFUSED";
+  const bool scared = mood == "SCARED";
 
   // Extra life: pupils and eye shapes drift slightly even while the robot is idle,
   // so the face does not look rigid or static.
@@ -482,13 +490,32 @@ void drawFace() {
     display.fillCircle(rightX + pupilDriftX, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
     display.drawLine(leftX - 13, eyeY - 18, leftX + 5, eyeY - 12, SSD1306_WHITE);
     display.drawLine(rightX - 5, eyeY - 12, rightX + 13, eyeY - 18, SSD1306_WHITE);
-  } else if (mood == "SURPRISED") {
+  } else if (mood == "SURPRISED" || scared) {
     display.drawRoundRect(leftX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
     display.drawRoundRect(rightX - 14, eyeY - 17, 28, 34, 10, SSD1306_WHITE);
-    display.fillCircle(leftX + pupilDriftX, eyeY + pupilDriftY, 7, SSD1306_WHITE);
-    display.fillCircle(rightX + pupilDriftX, eyeY + pupilDriftY, 7, SSD1306_WHITE);
-    display.fillCircle(leftX + pupilDriftX, eyeY + pupilDriftY, 3, SSD1306_BLACK);
-    display.fillCircle(rightX + pupilDriftX, eyeY + pupilDriftY, 3, SSD1306_BLACK);
+    const int pupilSize = scared ? 4 : 7;
+    display.fillCircle(leftX + pupilDriftX, eyeY + pupilDriftY, pupilSize, SSD1306_WHITE);
+    display.fillCircle(rightX + pupilDriftX, eyeY + pupilDriftY, pupilSize, SSD1306_WHITE);
+    display.fillCircle(leftX + pupilDriftX, eyeY + pupilDriftY, 2, SSD1306_BLACK);
+    display.fillCircle(rightX + pupilDriftX, eyeY + pupilDriftY, 2, SSD1306_BLACK);
+    if (scared) {
+      display.drawLine(leftX - 13, eyeY - 21, leftX + 8, eyeY - 16, SSD1306_WHITE);
+      display.drawLine(rightX - 8, eyeY - 16, rightX + 13, eyeY - 21, SSD1306_WHITE);
+    }
+  } else if (confused) {
+    display.fillRoundRect(leftX - 14, eyeY - 13, 28, 29, 10, SSD1306_WHITE);
+    display.fillRoundRect(rightX - 14, eyeY - 18, 28, 34, 10, SSD1306_WHITE);
+    display.fillCircle(leftX + pupilDriftX - 2, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
+    display.fillCircle(rightX + pupilDriftX + 2, eyeY - 2 + pupilDriftY, 5, SSD1306_BLACK);
+    display.drawLine(leftX - 12, eyeY - 20, leftX + 8, eyeY - 17, SSD1306_WHITE);
+    display.drawLine(rightX - 8, eyeY - 22, rightX + 12, eyeY - 16, SSD1306_WHITE);
+  } else if (shy) {
+    display.drawLine(leftX - 13, eyeY + 1, leftX - 6, eyeY - 4, SSD1306_WHITE);
+    display.drawLine(leftX - 6, eyeY - 4, leftX + 2, eyeY + 1, SSD1306_WHITE);
+    display.drawLine(rightX - 13, eyeY + 1, rightX - 6, eyeY - 4, SSD1306_WHITE);
+    display.drawLine(rightX - 6, eyeY - 4, rightX + 2, eyeY + 1, SSD1306_WHITE);
+    display.fillCircle(24, eyeY + 9, 2, SSD1306_WHITE);
+    display.fillCircle(104, eyeY + 9, 2, SSD1306_WHITE);
   } else if (happy) {
     // Happy crescent eyes with a lifted outer corner.
     display.drawLine(leftX - 13, eyeY + 3, leftX - 7, eyeY - 5, SSD1306_WHITE);
@@ -525,13 +552,16 @@ void drawFace() {
 
   // Tiny mouth glyph adds character without cluttering the display.
   const int mouthY = 56;
-  if (happy || mood == "LOVE") {
+  if (happy || mood == "LOVE" || shy) {
     display.drawLine(59, mouthY - 1, 64, mouthY + 2, SSD1306_WHITE);
     display.drawLine(64, mouthY + 2, 69, mouthY - 1, SSD1306_WHITE);
   } else if (annoyed) {
     display.drawLine(60, mouthY, 68, mouthY - 2, SSD1306_WHITE);
-  } else if (mood == "SURPRISED") {
-    display.drawCircle(64, mouthY, 3, SSD1306_WHITE);
+  } else if (mood == "SURPRISED" || scared) {
+    display.drawCircle(64, mouthY, scared ? 4 : 3, SSD1306_WHITE);
+  } else if (confused) {
+    display.drawLine(60, mouthY, 64, mouthY - 2, SSD1306_WHITE);
+    display.drawLine(64, mouthY - 2, 68, mouthY + 1, SSD1306_WHITE);
   } else if (sad) {
     display.drawLine(58, mouthY + 2, 64, mouthY - 2, SSD1306_WHITE);
     display.drawLine(64, mouthY - 2, 70, mouthY + 2, SSD1306_WHITE);
@@ -632,7 +662,8 @@ void applyChatEvent(String face, String impulse, bool faceAlreadyApplied) {
   const bool validFace =
       face == "HAPPY" || face == "CURIOUS" || face == "SLEEPY" ||
       face == "SURPRISED" || face == "ANNOYED" || face == "LOVE" ||
-      face == "SAD";
+      face == "SAD" || face == "EXCITED" || face == "SHY" ||
+      face == "CONFUSED" || face == "BORED" || face == "SCARED";
   if (validFace) {
     mood = face;
     lastCloudMood = face;
@@ -667,7 +698,9 @@ void pollCloud() {
       receivedMood == "SURPRISED" ||
       receivedMood == "ANNOYED" ||
       receivedMood == "LOVE" ||
-      receivedMood == "SAD";
+      receivedMood == "SAD" || receivedMood == "EXCITED" ||
+      receivedMood == "SHY" || receivedMood == "CONFUSED" ||
+      receivedMood == "BORED" || receivedMood == "SCARED";
 
   bool moodAppliedNow = false;
   if (validMood && receivedMood != lastCloudMood) {
@@ -696,7 +729,9 @@ void pollCloud() {
   if (command == "HAPPY" || command == "CURIOUS" ||
       command == "SLEEPY" || command == "SURPRISED" ||
       command == "ANNOYED" || command == "LOVE" ||
-      command == "SAD") {
+      command == "SAD" || command == "EXCITED" ||
+      command == "SHY" || command == "CONFUSED" ||
+      command == "BORED" || command == "SCARED") {
     if (command != lastCloudMood) {
       lastCloudMood = command;
       mood = command;
