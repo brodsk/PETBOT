@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v3.3.0
+  PETBOT firmware v3.6.0
   Board: LILYGO T3 V1.6.1 / classic ESP32
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
@@ -1588,8 +1588,17 @@ void checkForFirmwareUpdate() {
   String expectedMd5 = manifest.substring(split + 1);
   latestVersion.trim();
   expectedMd5.trim();
-  if (!latestVersion.length() || expectedMd5.length() != 32) return;
+  if (!latestVersion.startsWith("petbot-") || expectedMd5.length() != 32) return;
   if (latestVersion == FIRMWARE_VERSION) return;
+  // Reject malformed version strings and downgrades; only accept a newer x.y.z release.
+  int currentMajor = 0, currentMinor = 0, currentPatch = 0;
+  int latestMajor = 0, latestMinor = 0, latestPatch = 0;
+  if (sscanf(FIRMWARE_VERSION, "petbot-%d.%d.%d", &currentMajor, &currentMinor, &currentPatch) != 3 ||
+      sscanf(latestVersion.c_str(), "petbot-%d.%d.%d", &latestMajor, &latestMinor, &latestPatch) != 3) return;
+  const bool newer = latestMajor > currentMajor ||
+      (latestMajor == currentMajor && latestMinor > currentMinor) ||
+      (latestMajor == currentMajor && latestMinor == currentMinor && latestPatch > currentPatch);
+  if (!newer) { Serial.println("OTA: ignoring non-newer firmware version"); return; }
 
   Serial.println("OTA: new firmware " + latestVersion);
   otaInProgress = true;
