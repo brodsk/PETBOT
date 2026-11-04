@@ -37,9 +37,7 @@ jobs:
           done
           cp tools/usb-flash/flash.bat "$PACKAGE/flash.bat"
           cp tools/usb-flash/README.txt "$PACKAGE/README.txt"
-          cd "$PACKAGE"
-          zip -q -r "../$PACKAGE.zip" .
-          cd ..
+          python -c 'import os,sys,zipfile; p=sys.argv[1]; z=zipfile.ZipFile(p+".zip","w",zipfile.ZIP_DEFLATED); [z.write(os.path.join(p,f),f) for f in os.listdir(p)]; z.close()' "$PACKAGE"
           test -s "$PACKAGE.zip"
           ls -lh "$PACKAGE.zip" "$BUILD/firmware.bin"
       - name: Upload firmware binaries
