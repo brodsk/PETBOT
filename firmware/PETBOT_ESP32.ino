@@ -1655,7 +1655,8 @@ void checkForFirmwareUpdate() {
   }
 
   // Use HTTPClient's decoder so both Content-Length and chunked GitHub responses work.
-  FirmwareUpdateStream updateStream;\n  const int written = binHttp.writeToStream(&updateStream);
+  FirmwareUpdateStream updateStream;
+  const int written = binHttp.writeToStream(&updateStream);
   const bool lengthOk = length <= 0 || written == length;
   const bool finished = written > 0 && lengthOk && Update.end(true);
   binHttp.end();
