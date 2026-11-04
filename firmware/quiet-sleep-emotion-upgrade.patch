@@ -1,0 +1,39 @@
+diff --git a/firmware/PETBOT_ESP32.ino b/firmware/PETBOT_ESP32.ino
+--- a/firmware/PETBOT_ESP32.ino
++++ b/firmware/PETBOT_ESP32.ino
+@@
+ void requestVoice(const String& m, bool idle) {
++  // Sleeping must be genuinely silent. Do not queue a yawn, snore, or idle chirp;
++  // the voice task also checks mood so an already-playing phrase is cut off.
++  if (mood == "SLEEPY") {
++    voiceRequest = 0;
++    return;
++  }
+   if (!soundEnabled) return;
+@@
+     while ((t = millis() - t0) < s.ms) {
++      if (mood == "SLEEPY") {
++        noTone(PETBOT_PIEZO_PIN);
++        return true;
++      }
+       if (!soundEnabled) { noTone(PETBOT_PIEZO_PIN); return true; }
+@@
+ void updateSoundPersonality() {
+   const unsigned long now = millis();
++  // Hard silence in sleep: no scheduled dream beeps and cancel queued idle audio.
++  if (mood == "SLEEPY") {
++    voiceRequest = 0;
++    return;
++  }
+   if (!soundEnabled) return;
+@@
+-  // Sleep is not silence: occasional low, gentle dream-like beeps make PETBOT
+-  // feel alive without keeping the room noisy.
++  // Spontaneous sounds are only for awake moods.
+@@
+ void sampleMicrophone() {
+   if (!micEnabled) return; // prevent floating GPIO34 from causing false interactions
++  // Ignore ambient noise while asleep so a passing sound does not wake PETBOT
++  // and start the piezo at night. Button/touch commands can still wake it.
++  if (mood == "SLEEPY") return;
+*** End Patch
