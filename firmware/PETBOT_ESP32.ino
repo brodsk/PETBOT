@@ -31,7 +31,7 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 // Optional sound hardware: passive piezo on GPIO25; analog microphone OUT on GPIO34.
 #define PETBOT_PIEZO_PIN 25
 #define PETBOT_MIC_PIN 34
-#define PETBOT_MIC_THRESHOLD_DEFAULT 120  // ADC delta; tune for your specific mic board.
+#define PETBOT_MIC_THRESHOLD_DEFAULT 60  // ADC delta; tune for your specific mic board.
 #define PETBOT_BUTTON_PIN 0  // BOOT button on most T3 V1.6.1 boards, active low
 #define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
 bool touchEnabled = false;
