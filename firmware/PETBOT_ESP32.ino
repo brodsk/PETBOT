@@ -770,6 +770,72 @@ void drawFace() {
     display.drawLine(61, mouthY, 67, mouthY, SSD1306_WHITE);
   }
 
+  // Animated signature details: every mood has a living motion layer.
+  // Runs on the existing 15 fps face loop; no blocking delays.
+  const float phase = (float)t * 0.008f;
+  const int pulse = (int)roundf(2.0f + 2.0f * fabsf(sinf(phase)));
+  if (mood == "HAPPY" || mood == "PLAYFUL" || mood == "LOVE" ||
+      mood == "SHY" || mood == "ECSTATIC") {
+    const int blush = (int)((sinf(phase * 0.55f) + 1.0f) * 1.5f);
+    for (int k = 0; k < blush; k++) {
+      display.drawPixel(15 + k * 2, 48 + (k % 2), SSD1306_WHITE);
+      display.drawPixel(109 + k * 2, 48 + (k % 2), SSD1306_WHITE);
+    }
+  }
+  if (mood == "PLAYFUL") {
+    const bool winkLeft = ((t / 850UL) % 2UL) == 0;
+    if ((t % 1700UL) < 170UL) {
+      const int wx = winkLeft ? leftX : rightX;
+      display.fillRect(wx - 15, eyeY - 3, 30, 8, SSD1306_BLACK);
+      display.drawLine(wx - 13, eyeY + 2, wx, eyeY - 4, SSD1306_WHITE);
+      display.drawLine(wx, eyeY - 4, wx + 13, eyeY + 2, SSD1306_WHITE);
+    }
+    const int sparkleY = 17 + (int)roundf(3.0f * sinf(phase * 1.7f));
+    display.drawLine(64 - pulse, sparkleY, 64 + pulse, sparkleY, SSD1306_WHITE);
+    display.drawLine(64, sparkleY - pulse, 64, sparkleY + pulse, SSD1306_WHITE);
+  } else if (mood == "CURIOUS" || mood == "CONFUSED") {
+    display.setTextSize(1);
+    display.setCursor(111, 17 + (int)roundf(3.0f * sinf(phase)));
+    display.print(mood == "CONFUSED" ? "?" : ".");
+  } else if (mood == "HAPPY" || mood == "ECSTATIC" || mood == "EXCITED") {
+    const int sx = 12 + (int)((t / 55UL) % 105UL);
+    const int sy = 18 + (int)roundf(2.0f * sinf(phase * 1.8f));
+    display.drawPixel(sx, sy, SSD1306_WHITE);
+    display.drawPixel(127 - sx, sy + 5, SSD1306_WHITE);
+  } else if (mood == "SUSPICIOUS") {
+    const int scanX = 28 + (int)((t / 45UL) % 72UL);
+    display.drawPixel(scanX, 19, SSD1306_WHITE);
+    display.drawPixel(scanX + 1, 20, SSD1306_WHITE);
+  } else if (mood == "FRUSTRATED" || mood == "ANNOYED") {
+    const int j = (int)((t / 65UL) % 3UL) - 1;
+    display.drawLine(18 + j, 20, 22 + j, 15, SSD1306_WHITE);
+    display.drawLine(105 - j, 15, 109 - j, 20, SSD1306_WHITE);
+  } else if (mood == "SCARED") {
+    const int sy = 15 + (int)roundf(3.0f * sinf(phase * 2.2f));
+    display.drawPixel(117, sy, SSD1306_WHITE);
+    display.drawPixel(116, sy + 1, SSD1306_WHITE);
+    display.drawPixel(118, sy + 1, SSD1306_WHITE);
+  } else if (mood == "SAD") {
+    const int ty = 47 + (int)roundf(3.0f * fabsf(sinf(phase * 0.7f)));
+    display.drawPixel(18, ty, SSD1306_WHITE);
+    display.drawPixel(19, ty + 1, SSD1306_WHITE);
+  } else if (mood == "BORED") {
+    const int yawn = (int)roundf(2.0f + 3.0f * fabsf(sinf((float)t * 0.0012f)));
+    display.fillRoundRect(60, 53, 8, yawn, 3, SSD1306_WHITE);
+  } else if (mood == "SLEEPY") {
+    const int breath = (int)roundf(2.0f * sinf((float)t * 0.0018f));
+    display.drawPixel(112, 27 + breath, SSD1306_WHITE);
+  } else if (mood == "DIZZY") {
+    const int sx = 64 + (int)roundf(18.0f * cosf(phase));
+    const int sy = 18 + (int)roundf(5.0f * sinf(phase));
+    display.drawPixel(sx, sy, SSD1306_WHITE);
+    display.drawPixel(sx + 1, sy, SSD1306_WHITE);
+  } else if (mood == "SURPRISED") {
+    const int ray = 2 + (int)roundf(3.0f * fabsf(sinf(phase * 1.5f)));
+    display.drawLine(18, 25 - ray, 18, 25 + ray, SSD1306_WHITE);
+    display.drawLine(110, 25 - ray, 110, 25 + ray, SSD1306_WHITE);
+  }
+
   display.display();
 }
 
