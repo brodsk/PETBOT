@@ -4,7 +4,9 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "firmware/PETBOT_ESP32.ino"
+      - "firmware/**"
+      - "platformio.ini"
+      - "partitions_ota.csv"
       - ".github/workflows/build-firmware.yml"
 
 jobs:
@@ -14,30 +16,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Arduino CLI
-        uses: arduino/setup-arduino-cli@v2
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
 
-      - name: Install ESP32 platform
-        run: |
-          arduino-cli core update-index
-          arduino-cli core install esp32:esp32
+      - name: Install PlatformIO
+        run: pip install platformio
 
-      - name: Install libraries
-        run: |
-          arduino-cli lib install "WiFiManager"
-          arduino-cli lib install "Adafruit SSD1306"
-          arduino-cli lib install "Adafruit GFX Library"
+      - name: Build PETBOT
+        run: pio run -e petbot
 
-      - name: Compile PETBOT
-        run: |
-          mkdir -p build
-          arduino-cli compile --verbose --fqbn esp32:esp32:esp32 --output-dir build firmware
-
-      - name: Upload firmware binaries
+      - name: Upload firmware binary
         uses: actions/upload-artifact@v4
         with:
           name: PETBOT-firmware
-          path: |
-            build/*.bin
+          path: .pio/build/petbot/firmware.bin
           if-no-files-found: error
           retention-days: 30
