@@ -41,14 +41,17 @@ jobs:
             exit 1
           fi
           echo "Firmware size: ${SIZE}/${MAX_SIZE} bytes"
-          for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
+          for file in bootloader.bin partitions.bin firmware.bin; do
             test -s "$BUILD/$file"
           done
+          BOOT_APP0=$(find "$HOME/.platformio" -type f -name boot_app0.bin -print -quit)
+          test -n "$BOOT_APP0" && test -s "$BOOT_APP0"
           MD5=$(md5sum "$BIN" | cut -d' ' -f1)
           TAG="firmware-$VERSION"
           mkdir -p release
           cp "$BIN" release/petbot.bin
-          cp "$BUILD/bootloader.bin" "$BUILD/partitions.bin" "$BUILD/boot_app0.bin" "$BUILD/firmware.bin" tools/usb-flash/flash.bat release/
+          cp "$BUILD/bootloader.bin" "$BUILD/partitions.bin" "$BUILD/firmware.bin" tools/usb-flash/flash.bat release/
+          cp "$BOOT_APP0" release/boot_app0.bin
           cp tools/usb-flash/README.txt release/README.txt
           python -c 'import os,zipfile; p="release"; z=zipfile.ZipFile("PETBOT-USB-preserve-settings.zip","w",zipfile.ZIP_DEFLATED); [z.write(os.path.join(p,f),f) for f in os.listdir(p) if f != "manifest.txt"]; z.close()'
           printf '%s\n%s\n' "$VERSION" "$MD5" > release/manifest.txt
