@@ -1,0 +1,49 @@
+name: PETBOT firmware release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "firmware/**"
+      - "platformio.ini"
+      - "partitions_ota.csv"
+      - ".github/workflows/firmware-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build firmware
+        run: pio run -e petbot
+      - name: Prepare release assets
+        id: release
+        shell: bash
+        run: |
+          VERSION=$(grep -oP 'FIRMWARE_VERSION = "\K[^"]+' firmware/PETBOT_ESP32.ino)
+          BIN=".pio/build/petbot/firmware.bin"
+          test -s "$BIN"
+          MD5=$(md5sum "$BIN" | cut -d' ' -f1)
+          TAG="firmware-$VERSION"
+          mkdir -p release
+          cp "$BIN" release/petbot.bin
+          printf '%s\n%s\n' "$VERSION" "$MD5" > release/manifest.txt
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Publish firmware release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "${{ steps.release.outputs.tag }}" --yes || true
+          gh release create "${{ steps.release.outputs.tag }}" release/petbot.bin release/manifest.txt \
+            --title "PETBOT ${{ steps.release.outputs.version }}" \
+            --notes "Automatically built PETBOT firmware. OTA manifest and binary are attached."
