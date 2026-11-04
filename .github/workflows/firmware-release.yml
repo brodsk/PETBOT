@@ -7,6 +7,7 @@ on:
       - "firmware/**"
       - "platformio.ini"
       - "partitions_ota.csv"
+      - "tools/usb-flash/**"
       - ".github/workflows/firmware-release.yml"
   workflow_dispatch:
 
@@ -25,32 +26,14 @@ jobs:
         run: pip install platformio
       - name: Build firmware
         run: pio run -e petbot
-      - name: Create full USB flash image
-        shell: bash
-        run: |
-          set -euo pipefail
-          BUILD=".pio/build/petbot"
-                    for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
-            test -s "$BUILD/$file"
-          done
-          pio pkg exec -p tool-esptool -- esptool --chip esp32 merge_bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o "$BUILD/PETBOT-full-flash.bin" \
-            0x1000 "$BUILD/bootloader.bin" \
-            0x8000 "$BUILD/partitions.bin" \
-            0xe000 "$BUILD/boot_app0.bin" \
-            0x10000 "$BUILD/firmware.bin"
-          test -s "$BUILD/PETBOT-full-flash.bin"
       - name: Prepare release assets
         id: release
         shell: bash
         run: |
           set -euo pipefail
           VERSION=$(grep -oP 'FIRMWARE_VERSION = "\K[^"]+' firmware/PETBOT_ESP32.ino)
-          BIN=".pio/build/petbot/firmware.bin"
-          FULL=".pio/build/petbot/PETBOT-full-flash.bin"
-          test -s "$BIN"
-          test -s "$FULL"
+          BUILD=".pio/build/petbot"
+          BIN="$BUILD/firmware.bin"
           SIZE=$(stat -c%s "$BIN")
           MAX_SIZE=$((0x1E0000))
           if [ "$SIZE" -gt "$MAX_SIZE" ]; then
@@ -58,11 +41,23 @@ jobs:
             exit 1
           fi
           echo "Firmware size: ${SIZE}/${MAX_SIZE} bytes"
+          for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
+            test -s "$BUILD/$file"
+          done
           MD5=$(md5sum "$BIN" | cut -d' ' -f1)
           TAG="firmware-$VERSION"
           mkdir -p release
           cp "$BIN" release/petbot.bin
-          cp "$FULL" release/PETBOT-full-flash.bin
+          cp "$BUILD/bootloader.bin" "$BUILD/partitions.bin" "$BUILD/boot_app0.bin" "$BUILD/firmware.bin" tools/usb-flash/flash.bat release/
+          cat > release/README.txt <<'EOF'
+PETBOT USB INSTALLER (Windows)
+
+Extract PETBOT-USB-preserve-settings.zip and run flash.bat.
+The script installs esptool (Python 3 required) and flashes the bootloader,
+partition table, OTA boot data and firmware without erasing NVS.
+Saved Wi-Fi credentials and device settings are preserved.
+EOF
+          (cd release && zip -q -r ../PETBOT-USB-preserve-settings.zip .)
           printf '%s\n%s\n' "$VERSION" "$MD5" > release/manifest.txt
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -71,6 +66,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete "${{ steps.release.outputs.tag }}" --yes || true
-          gh release create "${{ steps.release.outputs.tag }}" release/petbot.bin release/manifest.txt release/PETBOT-full-flash.bin \
+          gh release create "${{ steps.release.outputs.tag }}" release/petbot.bin release/manifest.txt PETBOT-USB-preserve-settings.zip \
             --title "PETBOT ${{ steps.release.outputs.version }}" \
-            --notes "OTA firmware plus a complete 4 MB USB flash image (bootloader, partition table, boot_app0 and firmware). For a clean USB install, flash PETBOT-full-flash.bin at address 0x0."
+            --notes "OTA firmware plus a Windows USB installer package. The USB script preserves NVS settings and saved Wi-Fi credentials."
