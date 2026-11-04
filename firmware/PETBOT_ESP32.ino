@@ -1577,6 +1577,17 @@ static unsigned long blinkLengthFor(const String& m) {
   return 130UL;
 }
 
+// HTTPClient writes decoded response bytes into this adapter; UpdateClass is not a Stream.
+class FirmwareUpdateStream : public Stream {
+ public:
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+  void flush() override {}
+  size_t write(uint8_t value) override { return Update.write(&value, 1); }
+  size_t write(const uint8_t* buffer, size_t size) override { return Update.write(buffer, size); }
+};
+
 // Internet OTA: manifest format is two lines: version, then MD5 checksum.
 void checkForFirmwareUpdate() {
   const unsigned long now = millis();
@@ -1644,7 +1655,7 @@ void checkForFirmwareUpdate() {
   }
 
   // Use HTTPClient's decoder so both Content-Length and chunked GitHub responses work.
-  const int written = binHttp.writeToStream(&Update);
+  FirmwareUpdateStream updateStream;\n  const int written = binHttp.writeToStream(&updateStream);
   const bool lengthOk = length <= 0 || written == length;
   const bool finished = written > 0 && lengthOk && Update.end(true);
   binHttp.end();
