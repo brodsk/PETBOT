@@ -12,6 +12,7 @@
 #include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include "esp32_cert_bundle.h"
 #include <Update.h>
 #include <freertos/semphr.h>
 #include <Wire.h>
@@ -20,7 +21,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.0";
+const char* FIRMWARE_VERSION = "petbot-3.6.1";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -39,7 +40,7 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define PETBOT_MIC_PIN 34
 #define PETBOT_BATTERY_PIN 35
 #define PETBOT_BATTERY_DIVIDER 2.0f
-#define PETBOT_MIC_THRESHOLD_DEFAULT 15  // Lower ADC delta = higher microphone sensitivity.
+#define PETBOT_MIC_THRESHOLD_DEFAULT 8  // Lower ADC delta = higher microphone sensitivity.
 #define PETBOT_BUTTON_PIN 0  // BOOT button on most T3 V1.6.1 boards, active low
 #define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
 bool touchEnabled = false;
@@ -84,6 +85,8 @@ int micBaseline = 0;
 int micPeak = 0;
 int micThreshold = PETBOT_MIC_THRESHOLD_DEFAULT;
 bool soundEnabled = true;
+volatile bool voiceActive = false;
+volatile uint32_t lastVoiceEndedAt = 0;
 uint32_t interactionCount = 0;
 
 // Jupiter identity and battery monitor.
@@ -358,7 +361,10 @@ void voiceTask(void*) {
     if (!soundEnabled) continue;
     const bool idle = (req & 0x80) != 0;
     buildVoice(req & 0x7F, idle);
+    voiceActive = true;
     playVoiceSegs(idle);  // if interrupted, the newer request is picked up next loop
+    voiceActive = false;
+    lastVoiceEndedAt = millis();
   }
 }
 
@@ -413,24 +419,32 @@ void updateSoundPersonality() {
 }
 
 void sampleMicrophone() {
-  if (!micEnabled) return; // prevent floating GPIO34 from causing false interactions
+  if (!micEnabled || voiceActive) return; // ignore Jupiter's own piezo vocalizations
   const unsigned long now = millis();
-  if (now - lastSoundSample < 25) return;
+  if (now - lastVoiceEndedAt < 180UL) return; // allow the piezo and microphone to settle
+  if (now - lastSoundSample < 10UL) return;
   lastSoundSample = now;
 
-  int sample = analogRead(PETBOT_MIC_PIN);
+  const int sample = analogRead(PETBOT_MIC_PIN);
 
-  // Track the DC baseline and react to rapid changes in microphone level.
-  // This detects sounds, but does not identify words or understand speech.
+  // Follow the microphone's DC bias slowly and track short sound peaks.
+  // This detects acoustic events, not words or speech content.
   if (micBaseline == 0) micBaseline = sample;
-  int deviation = abs(sample - micBaseline);
-  micBaseline = (micBaseline * 15 + sample) / 16;
+  const int deviation = abs(sample - micBaseline);
+  micBaseline = (micBaseline * 31 + sample) / 32;
 
   static int soundEnvelope = 0;
-  soundEnvelope = max(deviation, (soundEnvelope * 3) / 4);
+  static uint8_t aboveThresholdSamples = 0;
+  soundEnvelope = max(deviation, (soundEnvelope * 7) / 8);
+  if (soundEnvelope > micThreshold) {
+    aboveThresholdSamples = min((int)aboveThresholdSamples + 1, 5);
+  } else if (aboveThresholdSamples > 0) {
+    aboveThresholdSamples--;
+  }
 
-  if (soundEnvelope > micThreshold &&
-      now - lastSoundEvent > 1400UL) {
+  if (aboveThresholdSamples >= 2 &&
+      now - lastSoundEvent > 900UL) {
+    aboveThresholdSamples = 0;
     lastSoundEvent = now;
     registerPetInteraction(false);
     mood = "SURPRISED";
@@ -1210,7 +1224,7 @@ void printPetbotHelp() {
   Serial.println("TOUCH:ON / TOUCH:OFF / TOUCH:READ - optional touch wire on GPIO4");
   Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD|PLAYFUL|DIZZY|SUSPICIOUS|FRUSTRATED|ECSTATIC / PURR");
   Serial.println("MIC:ON / MIC:OFF - enable or disable analog sound input");
-  Serial.println("MIC:THRESHOLD=15 - set sound sensitivity (15..1500; lower = more sensitive)");
+  Serial.println("MIC:THRESHOLD=8 - set sound sensitivity (3..1500; lower = more sensitive)");
   Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
   Serial.println("NEEDS - show all internal state dimensions");
   Serial.println("EVENT:SOUND / EVENT:SUCCESS / EVENT:FAIL - simulate sensor/outcome");
@@ -1367,7 +1381,7 @@ void handleSerialProvisioning() {
     Serial.println("Mic input disabled.");
   } else if (line.startsWith("MIC:THRESHOLD=")) {
     int value = line.substring(14).toInt();
-    if (value >= 15 && value <= 1500) {
+    if (value >= 3 && value <= 1500) {
       micThreshold = value;
       petbotPrefs.begin("petbot", false);
       petbotPrefs.putInt("mic_threshold", micThreshold);
@@ -1571,13 +1585,17 @@ void checkForFirmwareUpdate() {
   lastOtaCheck = now;
 
   WiFiClientSecure secure;
-  secure.setInsecure(); // HTTPS transport; firmware MD5 is checked before activation.
+  secure.setCACertBundle(x509_crt_bundle, x509_crt_bundle_len);
   HTTPClient http;
   http.setTimeout(12000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(secure, OTA_MANIFEST_URL)) return;
   const int code = http.GET();
-  if (code != HTTP_CODE_OK) { http.end(); return; }
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("OTA: manifest HTTP/TLS error %d\\n", code);
+    http.end();
+    return;
+  }
   String manifest = http.getString();
   http.end();
   manifest.trim();
@@ -1603,7 +1621,7 @@ void checkForFirmwareUpdate() {
   Serial.println("OTA: new firmware " + latestVersion);
   otaInProgress = true;
   WiFiClientSecure binClient;
-  binClient.setInsecure();
+  binClient.setCACertBundle(x509_crt_bundle, x509_crt_bundle_len);
   HTTPClient binHttp;
   binHttp.setTimeout(30000);
   binHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
@@ -1655,10 +1673,10 @@ void setup() {
   micEnabled = true;
   petbotPrefs.putBool("mic_enabled", true);
   touchEnabled = petbotPrefs.getBool("touch_en", false);
-  if (!petbotPrefs.getBool("mic_threshold_15_applied", false)) {
-    micThreshold = 15;
+  if (!petbotPrefs.getBool("mic_threshold_8_applied", false)) {
+    micThreshold = PETBOT_MIC_THRESHOLD_DEFAULT;
     petbotPrefs.putInt("mic_threshold", micThreshold);
-    petbotPrefs.putBool("mic_threshold_15_applied", true);
+    petbotPrefs.putBool("mic_threshold_8_applied", true);
   } else {
     micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
   }
