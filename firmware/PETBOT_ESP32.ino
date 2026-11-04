@@ -39,7 +39,7 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define PETBOT_MIC_PIN 34
 #define PETBOT_BATTERY_PIN 35
 #define PETBOT_BATTERY_DIVIDER 2.0f
-#define PETBOT_MIC_THRESHOLD_DEFAULT 60  // ADC delta; tune for your specific mic board.
+#define PETBOT_MIC_THRESHOLD_DEFAULT 15  // Lower ADC delta = higher microphone sensitivity.
 #define PETBOT_BUTTON_PIN 0  // BOOT button on most T3 V1.6.1 boards, active low
 #define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
 bool touchEnabled = false;
@@ -1210,7 +1210,7 @@ void printPetbotHelp() {
   Serial.println("TOUCH:ON / TOUCH:OFF / TOUCH:READ - optional touch wire on GPIO4");
   Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD|PLAYFUL|DIZZY|SUSPICIOUS|FRUSTRATED|ECSTATIC / PURR");
   Serial.println("MIC:ON / MIC:OFF - enable or disable analog sound input");
-  Serial.println("MIC:THRESHOLD=240 - set sound sensitivity (50..1500)");
+  Serial.println("MIC:THRESHOLD=15 - set sound sensitivity (15..1500; lower = more sensitive)");
   Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
   Serial.println("NEEDS - show all internal state dimensions");
   Serial.println("EVENT:SOUND / EVENT:SUCCESS / EVENT:FAIL - simulate sensor/outcome");
@@ -1367,14 +1367,14 @@ void handleSerialProvisioning() {
     Serial.println("Mic input disabled.");
   } else if (line.startsWith("MIC:THRESHOLD=")) {
     int value = line.substring(14).toInt();
-    if (value >= 50 && value <= 1500) {
+    if (value >= 15 && value <= 1500) {
       micThreshold = value;
       petbotPrefs.begin("petbot", false);
       petbotPrefs.putInt("mic_threshold", micThreshold);
       petbotPrefs.end();
       Serial.println(String("Mic threshold set to ") + micThreshold);
     } else {
-      Serial.println("Threshold must be between 50 and 1500.");
+      Serial.println("Threshold must be between 15 and 1500.");
     }
   } else if (line == "MIC:CAL") {
     Serial.println("Calibrating microphone for 3 seconds. Keep the room quiet...");
@@ -1393,7 +1393,7 @@ void handleSerialProvisioning() {
     }
     micBaseline = count ? (int)(total / (long)count) : 0;
     int noiseSpan = maximum - minimum;
-    micThreshold = constrain(noiseSpan * 3, 80, 1500);
+    micThreshold = constrain(noiseSpan * 3, 15, 1500);
     petbotPrefs.begin("petbot", false);
     petbotPrefs.putInt("mic_threshold", micThreshold);
     petbotPrefs.end();
@@ -1646,7 +1646,13 @@ void setup() {
   micEnabled = true;
   petbotPrefs.putBool("mic_enabled", true);
   touchEnabled = petbotPrefs.getBool("touch_en", false);
-  micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
+  if (!petbotPrefs.getBool("mic_threshold_15_applied", false)) {
+    micThreshold = 15;
+    petbotPrefs.putInt("mic_threshold", micThreshold);
+    petbotPrefs.putBool("mic_threshold_15_applied", true);
+  } else {
+    micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
+  }
   interactionCount = petbotPrefs.getUInt("interactions", 0);
   petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
   petEnergy = constrain(petbotPrefs.getInt("energy", 88), 0, 100);
