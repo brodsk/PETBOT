@@ -21,7 +21,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.1";
+const char* FIRMWARE_VERSION = "petbot-3.6.2";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -1632,20 +1632,25 @@ void checkForFirmwareUpdate() {
     binHttp.end(); otaInProgress = false; return;
   }
   const int length = binHttp.getSize();
-  WiFiClient* stream = binHttp.getStreamPtr();
-  if (length <= 0 || !Update.begin((size_t)length)) {
-    Serial.println("OTA: image size invalid or insufficient OTA partition");
+  Serial.printf("OTA: download size header = %d bytes\\n", length);
+  const size_t beginSize = length > 0 ? (size_t)length : UPDATE_SIZE_UNKNOWN;
+  if (!Update.begin(beginSize)) {
+    Serial.printf("OTA: Update.begin failed, error=%u\\n", Update.getError());
     binHttp.end(); otaInProgress = false; return;
   }
   if (!Update.setMD5(expectedMd5.c_str())) {
     Serial.println("OTA: invalid MD5");
     Update.abort(); binHttp.end(); otaInProgress = false; return;
   }
-  const size_t written = Update.writeStream(*stream);
-  const bool finished = written == (size_t)length && Update.end(true);
+
+  // Use HTTPClient's decoder so both Content-Length and chunked GitHub responses work.
+  const int written = binHttp.writeToStream(&Update);
+  const bool lengthOk = length <= 0 || written == length;
+  const bool finished = written > 0 && lengthOk && Update.end(true);
   binHttp.end();
   if (!finished || !Update.isFinished()) {
-    Serial.printf("OTA: failed, wrote %u of %d bytes\\n", (unsigned)written, length);
+    Serial.printf("OTA: failed, wrote %d bytes (expected %d), update error=%u\\n",
+                  written, length, Update.getError());
     Update.abort(); otaInProgress = false; return;
   }
   Serial.println("OTA: installed; rebooting");
