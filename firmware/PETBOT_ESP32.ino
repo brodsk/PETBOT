@@ -784,36 +784,28 @@ void drawFace() {
       }
     }
   } else if (happy) {
-    // Happy crescent eyes with a lifted outer corner.
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.drawLine(ex - 13, eyeY + 3, ex - 7, eyeY - 5, SSD1306_WHITE);
-      display.drawLine(ex - 7, eyeY - 5, ex, eyeY - 8, SSD1306_WHITE);
-      display.drawLine(ex, eyeY - 8, ex + 7, eyeY - 5, SSD1306_WHITE);
-      display.drawLine(ex + 7, eyeY - 5, ex + 13, eyeY + 3, SSD1306_WHITE);
+    // Reference-sheet style: sharp playful > < eyes with animated cheek marks.
+    const int squeeze = (int)roundf(2.0f * fabsf(sinf(t * 0.009f)));
+    display.drawLine(leftX - 15, eyeY - 10 + squeeze, leftX + 12, eyeY, SSD1306_WHITE);
+    display.drawLine(leftX - 15, eyeY + 10 - squeeze, leftX + 12, eyeY, SSD1306_WHITE);
+    display.drawLine(rightX + 15, eyeY - 10 + squeeze, rightX - 12, eyeY, SSD1306_WHITE);
+    display.drawLine(rightX + 15, eyeY + 10 - squeeze, rightX - 12, eyeY, SSD1306_WHITE);
+    for (int k = 0; k < 3; k++) {
+      display.drawLine(leftX - 9 + k * 5, eyeY + 17, leftX - 12 + k * 5, eyeY + 21, SSD1306_WHITE);
+      display.drawLine(rightX - 9 + k * 5, eyeY + 17, rightX - 6 + k * 5, eyeY + 21, SSD1306_WHITE);
     }
   } else {
-    // CURIOUS / ANNOYED / neutral. Curious eyes rock like a tilting head.
-    const int tilt = (mood == "CURIOUS") ? (int)roundf(2.5f * sinf(t * 0.0021f)) : 0;
-    int top = eyeY - eyeH / 2;
-    int height = eyeH;
-    if (annoyed) { top += 5; height -= 7; }
-    display.fillRoundRect(leftX - eyeW / 2, top + tilt, eyeW, height, 11, SSD1306_WHITE);
-    display.fillRoundRect(rightX - eyeW / 2, top - tilt, eyeW, height, 11, SSD1306_WHITE);
-
-    int pupilY = eyeY + pupilDriftY;
-    if (mood == "CURIOUS") pupilY -= 4;
-    if (annoyed) pupilY += 4;
-    const int pupilLX = leftX + 2 + pupilDriftX;
-    const int pupilRX = rightX + 2 + pupilDriftX;
-    display.fillCircle(pupilLX, pupilY + tilt, 6, SSD1306_BLACK);
-    display.fillCircle(pupilRX, pupilY - tilt, 6, SSD1306_BLACK);
-    display.fillCircle(pupilLX - 2, pupilY + tilt - 2, 2, SSD1306_WHITE);
-    display.fillCircle(pupilRX - 2, pupilY - tilt - 2, 2, SSD1306_WHITE);
-
-    if (annoyed) {
-      display.drawLine(leftX - 13, eyeY - 17, leftX + 7, eyeY - 12, SSD1306_WHITE);
-      display.drawLine(rightX - 7, eyeY - 12, rightX + 13, eyeY - 17, SSD1306_WHITE);
+    // Reference-sheet curious face: round O eyes with pupils that gently wander.
+    const int pulse = 12 + (int)roundf(2.0f * sinf(t * 0.004f));
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.drawCircle(ex, eyeY, pulse, SSD1306_WHITE);
+      display.fillCircle(ex + pupilDriftX / 2, eyeY + pupilDriftY / 2, 4, SSD1306_WHITE);
+      display.drawCircle(ex + pupilDriftX / 2, eyeY + pupilDriftY / 2, 2, SSD1306_BLACK);
+    }
+    if (mood == "ANNOYED") {
+      display.drawLine(leftX - 15, eyeY - 17, leftX + 7, eyeY - 11, SSD1306_WHITE);
+      display.drawLine(rightX - 7, eyeY - 11, rightX + 15, eyeY - 17, SSD1306_WHITE);
     }
   }
 
