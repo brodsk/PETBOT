@@ -30,11 +30,10 @@ jobs:
         run: |
           set -euo pipefail
           BUILD=".pio/build/petbot"
-          ESPTOOL="$HOME/.platformio/packages/tool-esptool/esptool.py"
-          for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
+                    for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
             test -s "$BUILD/$file"
           done
-          python "$ESPTOOL" --chip esp32 merge_bin \
+          pio pkg exec -p tool-esptool -- esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             -o "$BUILD/PETBOT-full-flash.bin" \
             0x1000 "$BUILD/bootloader.bin" \
