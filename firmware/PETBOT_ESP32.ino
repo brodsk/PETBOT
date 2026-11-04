@@ -31,7 +31,7 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 // Optional sound hardware: passive piezo on GPIO25; analog microphone OUT on GPIO34.
 #define PETBOT_PIEZO_PIN 25
 #define PETBOT_MIC_PIN 34
-#define PETBOT_MIC_THRESHOLD_DEFAULT 240  // ADC delta; tune from Serial readings for your specific mic board.
+#define PETBOT_MIC_THRESHOLD_DEFAULT 120  // ADC delta; tune for your specific mic board.
 #define PETBOT_BUTTON_PIN 0  // BOOT button on most T3 V1.6.1 boards, active low
 #define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
 bool touchEnabled = false;
@@ -68,7 +68,7 @@ unsigned long moodChangedAt = 0;
 bool displayReady = false;
 unsigned long lastSoundSample = 0;
 unsigned long lastInteractionAt = 0;
-bool micEnabled = false; // optional input is off until a compatible sensor is wired
+bool micEnabled = true; // microphone sound reactions enabled by default
 unsigned long lastSoundEvent = 0;
 unsigned long nextIdleSoundAt = 0;
 unsigned long lastMoodSoundAt = 0;
@@ -1355,7 +1355,8 @@ void setup() {
   petbotPrefs.begin("petbot", false);
   deviceToken = petbotPrefs.getString("device_token", "");
   soundEnabled = petbotPrefs.getBool("sound", true);
-  micEnabled = petbotPrefs.getBool("mic_enabled", false);
+  micEnabled = true;
+  petbotPrefs.putBool("mic_enabled", true);
   touchEnabled = petbotPrefs.getBool("touch_en", false);
   micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
   interactionCount = petbotPrefs.getUInt("interactions", 0);
