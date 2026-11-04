@@ -21,7 +21,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.2";
+const char* FIRMWARE_VERSION = "petbot-3.6.3";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -329,6 +329,11 @@ static bool playVoiceSegs(bool idle) {
     uint32_t t;
     if (s.mod == VM_REST) { noTone(PETBOT_PIEZO_PIN); lastF = 0; }
     while ((t = millis() - t0) < s.ms) {
+      // Stop an in-progress phrase immediately when sleep starts.
+      if (mood == "SLEEPY") {
+        noTone(PETBOT_PIEZO_PIN);
+        return true;
+      }
       if (!soundEnabled) { noTone(PETBOT_PIEZO_PIN); return true; }
       const uint8_t req = voiceRequest;
       if (req) {
@@ -369,6 +374,12 @@ void voiceTask(void*) {
 }
 
 void requestVoice(const String& m, bool idle) {
+  // Sleep is silent: do not queue snores, yawns, or delayed sounds.
+  if (mood == "SLEEPY" || m == "SLEEPY") {
+    voiceRequest = 0;
+    noTone(PETBOT_PIEZO_PIN);
+    return;
+  }
   if (!soundEnabled) return;
   const uint8_t code = voiceCodeForMood(m);
   // never let an idle murmur overwrite a pending real reaction
@@ -400,6 +411,12 @@ void playIdleSound() {
 
 void updateSoundPersonality() {
   const unsigned long now = millis();
+  // Cancel both queued and scheduled idle audio for the entire sleep state.
+  if (mood == "SLEEPY") {
+    voiceRequest = 0;
+    noTone(PETBOT_PIEZO_PIN);
+    return;
+  }
   if (!soundEnabled) return;
   if (nextIdleSoundAt == 0) scheduleNextIdleSound();
 
@@ -409,8 +426,7 @@ void updateSoundPersonality() {
     return;
   }
 
-  // Sleep is not silence: occasional low, gentle dream-like beeps make PETBOT
-  // feel alive without keeping the room noisy.
+  // Spontaneous sounds are only for awake moods.
   if (now >= nextIdleSoundAt && now - lastSoundEvent > 1800UL) {
     playIdleSound();
     lastMoodSoundAt = now;
@@ -419,6 +435,8 @@ void updateSoundPersonality() {
 }
 
 void sampleMicrophone() {
+  // Ignore ambient noise while asleep; physical button/touch can still wake PETBOT.
+  if (mood == "SLEEPY") return;
   if (!micEnabled || voiceActive) return; // ignore Jupiter's own piezo vocalizations
   const unsigned long now = millis();
   if (now - lastVoiceEndedAt < 180UL) return; // allow the piezo and microphone to settle
@@ -630,6 +648,8 @@ void drawFace() {
   const bool annoyed = mood == "ANNOYED" || mood == "FRUSTRATED" || squint;
   const bool alreadyClosedLook = mood == "HAPPY" || mood == "SHY" || mood == "SLEEPY" || excitedAction;
   const bool sleepy = !eyesOpen || mood == "SLEEPY";
+  // Keep gaze still while asleep; awake gaze remains expressive.
+  if (sleepy) { gazeX = gazeY = 0.0f; gazeTargetX = gazeTargetY = 0.0f; }
   const bool lidsDown = sleepy || (blinking && !alreadyClosedLook);
 
   // Extra life: pupils drift slightly even while the robot is idle.
