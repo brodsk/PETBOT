@@ -31,6 +31,8 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 // Optional sound hardware: passive piezo on GPIO25; analog microphone OUT on GPIO34.
 #define PETBOT_PIEZO_PIN 25
 #define PETBOT_MIC_PIN 34
+#define PETBOT_BATTERY_PIN 35
+#define PETBOT_BATTERY_DIVIDER 2.0f
 #define PETBOT_MIC_THRESHOLD_DEFAULT 60  // ADC delta; tune for your specific mic board.
 #define PETBOT_BUTTON_PIN 0  // BOOT button on most T3 V1.6.1 boards, active low
 #define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
@@ -77,6 +79,17 @@ int micPeak = 0;
 int micThreshold = PETBOT_MIC_THRESHOLD_DEFAULT;
 bool soundEnabled = true;
 uint32_t interactionCount = 0;
+
+// Jupiter identity and battery monitor.
+String petName = "Jupiter";
+float batteryVoltage = 0.0f;
+int batteryPercent = -1;
+bool batteryCharging = false;
+bool batteryLowAlerted = false;
+unsigned long lastBatteryRead = 0;
+unsigned long batteryTrendAt = 0;
+float batteryTrendStart = 0.0f;
+unsigned long batteryMoodUntil = 0;
 
 // Local pet needs/personality model. Runs on the ESP32 even without cloud access.
 int petCuriosity = 58;       // rises during quiet time; positive interaction settles it
@@ -452,6 +465,68 @@ String jsonStringField(const String& json, const String& key) {
   return json.substring(valueAt + 1, endQuote);
 }
 
+static int batteryPercentFromVoltage(float v) {
+  if (v <= 3.30f) return 0;
+  if (v >= 4.20f) return 100;
+  const float volts[] = {3.30f, 3.50f, 3.60f, 3.70f, 3.75f, 3.80f, 3.90f, 4.00f, 4.10f, 4.20f};
+  const int pct[] = {0, 5, 12, 25, 35, 48, 65, 78, 90, 100};
+  for (int i = 1; i < 10; i++) {
+    if (v <= volts[i]) {
+      float f = (v - volts[i - 1]) / (volts[i] - volts[i - 1]);
+      return (int)roundf(pct[i - 1] + f * (pct[i] - pct[i - 1]));
+    }
+  }
+  return 100;
+}
+
+void updateBattery() {
+  const unsigned long now = millis();
+  if (now - lastBatteryRead < 5000UL) return;
+  lastBatteryRead = now;
+  uint32_t totalMv = 0;
+  for (int i = 0; i < 12; i++) {
+    totalMv += analogReadMilliVolts(PETBOT_BATTERY_PIN);
+    delayMicroseconds(250);
+  }
+  const float measured = (totalMv / 12.0f) * PETBOT_BATTERY_DIVIDER / 1000.0f;
+  if (measured < 2.5f || measured > 5.0f) return;
+  batteryVoltage = batteryVoltage <= 0.0f ? measured : batteryVoltage * 0.72f + measured * 0.28f;
+  batteryPercent = batteryPercentFromVoltage(batteryVoltage);
+
+  // This board exposes battery voltage, not a dedicated charger-status signal.
+  // Infer charging only from a sustained voltage rise.
+  if (batteryTrendAt == 0) {
+    batteryTrendAt = now;
+    batteryTrendStart = batteryVoltage;
+  } else if (now - batteryTrendAt >= 30000UL) {
+    batteryCharging = batteryVoltage > batteryTrendStart + 0.025f;
+    batteryTrendAt = now;
+    batteryTrendStart = batteryVoltage;
+  }
+
+  if (batteryPercent <= 15 && !batteryLowAlerted) {
+    batteryLowAlerted = true;
+    batteryMoodUntil = now + 7000UL;
+    mood = "SLEEPY";
+    petEnergy = min(petEnergy, 18);
+    playRobotSound("SLEEPY");
+    Serial.println(String(petName) + ": low battery");
+  } else if (batteryPercent >= 22) {
+    batteryLowAlerted = false;
+  }
+
+  static bool wasCharging = false;
+  if (batteryCharging && !wasCharging && batteryPercent > 15) {
+    batteryMoodUntil = now + 5000UL;
+    mood = "HAPPY";
+    petMoodValue = min(100, petMoodValue + 5);
+    playRobotSound("HAPPY");
+    Serial.println(String(petName) + ": charging detected");
+  }
+  wasCharging = batteryCharging;
+  drawFace();
+}
+
 void drawFace() {
   if (!displayReady) return;
 
@@ -469,12 +544,26 @@ void drawFace() {
   display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
 
-  // Compact status bar: fixed-width labels stay inside the 128px OLED.
+  // Jupiter identity and live battery status replace PET / Wi-Fi labels.
   display.setCursor(3, 2);
-  display.print("PET");
-  display.fillCircle(25, 5, 2, SSD1306_WHITE);
-  display.setCursor(104, 2);
-  display.print(WiFi.status() == WL_CONNECTED ? "ON" : "OFF");
+  display.print("JUPITER");
+  const int bx = 91, by = 2;
+  display.drawRect(bx, by, 25, 10, SSD1306_WHITE);
+  display.fillRect(bx + 25, by + 3, 3, 4, SSD1306_WHITE);
+  if (batteryPercent >= 0) {
+    const int fillW = constrain((batteryPercent * 21) / 100, 0, 21);
+    if (fillW > 0) display.fillRect(bx + 2, by + 2, fillW, 6, SSD1306_WHITE);
+    if (batteryCharging && ((t / 350UL) % 2UL) == 0) {
+      display.drawLine(bx + 12, by + 1, bx + 9, by + 5, SSD1306_BLACK);
+      display.drawLine(bx + 9, by + 5, bx + 14, by + 5, SSD1306_BLACK);
+      display.drawLine(bx + 14, by + 5, bx + 11, by + 9, SSD1306_BLACK);
+    }
+    display.setCursor(58, 2);
+    display.print(String(batteryPercent) + "%");
+  } else {
+    display.setCursor(58, 2);
+    display.print("--%");
+  }
 
   if (notificationMessage.length() && (long)(notificationUntil - millis()) > 0) {
     display.drawLine(4, 12, 123, 12, SSD1306_WHITE);
@@ -1484,10 +1573,14 @@ void setup() {
   pinMode(PETBOT_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PETBOT_BUTTON_PIN), onButtonEdge, CHANGE);
   analogReadResolution(12);
+  analogSetPinAttenuation(PETBOT_BATTERY_PIN, ADC_11db);
+  pinMode(PETBOT_BATTERY_PIN, INPUT);
   analogSetPinAttenuation(PETBOT_MIC_PIN, ADC_11db);
 
   petbotPrefs.begin("petbot", false);
   deviceToken = petbotPrefs.getString("device_token", "");
+  petName = petbotPrefs.getString("pet_name", "Jupiter");
+  petbotPrefs.putString("pet_name", "Jupiter");
   soundEnabled = petbotPrefs.getBool("sound", true);
   micEnabled = true;
   petbotPrefs.putBool("mic_enabled", true);
@@ -1504,6 +1597,7 @@ void setup() {
   petbotPrefs.end();
   if (touchEnabled) calibrateTouch();
 
+  Serial.println(String("Hello! My name is ") + petName);
   Serial.println(
       String("PETBOT firmware ") + FIRMWARE_VERSION
   );
@@ -1567,7 +1661,7 @@ void setup() {
     display.setTextColor(SSD1306_WHITE);
     display.setTextSize(1);
     display.setCursor(0, 0);
-    display.println("PETBOT online");
+    display.println(String(petName) + " online");
     display.println(WiFi.SSID());
     display.println(WiFi.localIP());
     display.display();
@@ -1635,7 +1729,7 @@ void updateMicroAction() {
   if (fabsf(gazeTargetY + idleDriftY - gazeY) < 0.18f) gazeY = gazeTargetY + idleDriftY;
   bool gazeMoved = (fabsf(gazeX - oldX) > 0.15f || fabsf(gazeY - oldY) > 0.15f);
 
-  if (now < moodOverrideUntil || mood == "SLEEPY" || petEnergy < 18) {
+  if (now < moodOverrideUntil || now < batteryMoodUntil || mood == "SLEEPY" || petEnergy < 18) {
     gazeTargetX = 0.0f;
     gazeTargetY = 0.0f;
     microAction = "";
@@ -1799,6 +1893,7 @@ void loop() {
     drawFace();
   }
   updatePetNeeds();
+  updateBattery();
   updateAutonomousMood();
   updateMicroAction();
   updatePhysicalInput();
