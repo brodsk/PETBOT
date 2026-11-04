@@ -31,10 +31,13 @@ jobs:
           BUILD=".pio/build/petbot"
           PACKAGE="PETBOT-USB-preserve-settings"
           mkdir -p "$PACKAGE"
-          for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
+          for file in bootloader.bin partitions.bin firmware.bin; do
             test -s "$BUILD/$file"
             cp "$BUILD/$file" "$PACKAGE/$file"
           done
+          BOOT_APP0=$(find "$HOME/.platformio" -type f -name boot_app0.bin -print -quit)
+          test -n "$BOOT_APP0" && test -s "$BOOT_APP0"
+          cp "$BOOT_APP0" "$PACKAGE/boot_app0.bin"
           cp tools/usb-flash/flash.bat "$PACKAGE/flash.bat"
           cp tools/usb-flash/README.txt "$PACKAGE/README.txt"
           python -c 'import os,sys,zipfile; p=sys.argv[1]; z=zipfile.ZipFile(p+".zip","w",zipfile.ZIP_DEFLATED); [z.write(os.path.join(p,f),f) for f in os.listdir(p)]; z.close()' "$PACKAGE"
