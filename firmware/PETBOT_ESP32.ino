@@ -11,6 +11,8 @@
 #include <Preferences.h>
 #include <WiFiManager.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <Update.h>
 #include <freertos/semphr.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -18,7 +20,11 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.5.0";
+const char* FIRMWARE_VERSION = "petbot-3.6.0";
+const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
+const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
+unsigned long lastOtaCheck = 0;
+bool otaInProgress = false;
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -1557,6 +1563,69 @@ static unsigned long blinkLengthFor(const String& m) {
   return 130UL;
 }
 
+// Internet OTA: manifest format is two lines: version, then MD5 checksum.
+void checkForFirmwareUpdate() {
+  const unsigned long now = millis();
+  if (otaInProgress || WiFi.status() != WL_CONNECTED) return;
+  if (lastOtaCheck && now - lastOtaCheck < 6UL * 60UL * 60UL * 1000UL) return;
+  lastOtaCheck = now;
+
+  WiFiClientSecure secure;
+  secure.setInsecure(); // HTTPS transport; firmware MD5 is checked before activation.
+  HTTPClient http;
+  http.setTimeout(12000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!http.begin(secure, OTA_MANIFEST_URL)) return;
+  const int code = http.GET();
+  if (code != HTTP_CODE_OK) { http.end(); return; }
+  String manifest = http.getString();
+  http.end();
+  manifest.trim();
+
+  const int split = manifest.indexOf('\n');
+  if (split < 0) return;
+  String latestVersion = manifest.substring(0, split);
+  String expectedMd5 = manifest.substring(split + 1);
+  latestVersion.trim();
+  expectedMd5.trim();
+  if (!latestVersion.length() || expectedMd5.length() != 32) return;
+  if (latestVersion == FIRMWARE_VERSION) return;
+
+  Serial.println("OTA: new firmware " + latestVersion);
+  otaInProgress = true;
+  WiFiClientSecure binClient;
+  binClient.setInsecure();
+  HTTPClient binHttp;
+  binHttp.setTimeout(30000);
+  binHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!binHttp.begin(binClient, OTA_FIRMWARE_URL)) { otaInProgress = false; return; }
+  const int binCode = binHttp.GET();
+  if (binCode != HTTP_CODE_OK) {
+    Serial.printf("OTA: download HTTP %d\\n", binCode);
+    binHttp.end(); otaInProgress = false; return;
+  }
+  const int length = binHttp.getSize();
+  WiFiClient* stream = binHttp.getStreamPtr();
+  if (length <= 0 || !Update.begin((size_t)length)) {
+    Serial.println("OTA: image size invalid or insufficient OTA partition");
+    binHttp.end(); otaInProgress = false; return;
+  }
+  if (!Update.setMD5(expectedMd5.c_str())) {
+    Serial.println("OTA: invalid MD5");
+    Update.abort(); binHttp.end(); otaInProgress = false; return;
+  }
+  const size_t written = Update.writeStream(*stream);
+  const bool finished = written == (size_t)length && Update.end(true);
+  binHttp.end();
+  if (!finished || !Update.isFinished()) {
+    Serial.printf("OTA: failed, wrote %u of %d bytes\\n", (unsigned)written, length);
+    Update.abort(); otaInProgress = false; return;
+  }
+  Serial.println("OTA: installed; rebooting");
+  delay(500);
+  ESP.restart();
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PETBOT_PIEZO_PIN, OUTPUT);
@@ -1880,6 +1949,7 @@ void loop() {
     xTaskCreatePinnedToCore(cloudTask, "petbot_cloud", 10240, NULL, 1, NULL, 0);
   }
   handleSerialProvisioning();
+  checkForFirmwareUpdate();
   if (notificationMessage.length() && (long)(millis() - notificationUntil) >= 0) {
     notificationMessage = "";
     drawFace();
