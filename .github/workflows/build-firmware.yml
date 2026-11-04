@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           BUILD=".pio/build/petbot"
-          ESPTOOL="$HOME/.platformio/packages/tool-esptoolpy/esptool.py"
+          ESPTOOL="$HOME/.platformio/packages/tool-esptool/esptool.py"
           for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
             test -s "$BUILD/$file"
           done
