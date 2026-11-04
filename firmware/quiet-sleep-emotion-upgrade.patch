@@ -1,0 +1,78 @@
+diff --git a/firmware/PETBOT_ESP32.ino b/firmware/PETBOT_ESP32.ino
+--- a/firmware/PETBOT_ESP32.ino
++++ b/firmware/PETBOT_ESP32.ino
+@@ -291,6 +291,10 @@ static bool playVoiceSegs(bool idle) {
+     const uint32_t t0 = millis();
+     uint32_t t;
+     if (s.mod == VM_REST) { noTone(PETBOT_PIEZO_PIN); lastF = 0; }
+     while ((t = millis() - t0) < s.ms) {
++      // Stop an in-progress phrase immediately when sleep starts.
++      if (mood == "SLEEPY") {
++        noTone(PETBOT_PIEZO_PIN);
++        return true;
++      }
+       if (!soundEnabled) { noTone(PETBOT_PIEZO_PIN); return true; }
+       const uint8_t req = voiceRequest;
+@@ -333,6 +337,11 @@ void voiceTask(void*) {
+ }
+ 
+ void requestVoice(const String& m, bool idle) {
++  // Sleep is silent: do not queue snores, yawns, or delayed sounds.
++  if (mood == "SLEEPY" || m == "SLEEPY") {
++    voiceRequest = 0;
++    noTone(PETBOT_PIEZO_PIN);
++    return;
++  }
+   if (!soundEnabled) return;
+   const uint8_t code = voiceCodeForMood(m);
+   // never let an idle murmur overwrite a pending real reaction
+@@ -363,6 +372,12 @@ void playIdleSound() {
+ 
+ void updateSoundPersonality() {
+   const unsigned long now = millis();
++  // Cancel both queued and scheduled idle audio for the entire sleep state.
++  if (mood == "SLEEPY") {
++    voiceRequest = 0;
++    noTone(PETBOT_PIEZO_PIN);
++    return;
++  }
+   if (!soundEnabled) return;
+   if (nextIdleSoundAt == 0) scheduleNextIdleSound();
+ 
+@@ -374,8 +389,7 @@ void updateSoundPersonality() {
+     return;
+   }
+ 
+-  // Sleep is not silence: occasional low, gentle dream-like beeps make PETBOT
+-  // feel alive without keeping the room noisy.
++  // Spontaneous sounds are only for awake moods.
+   if (now >= nextIdleSoundAt && now - lastSoundEvent > 1800UL) {
+     playIdleSound();
+     lastMoodSoundAt = now;
+@@ -384,6 +398,10 @@ void updateSoundPersonality() {
+ }
+ 
+ void sampleMicrophone() {
++  // Ignore ambient noise while asleep; physical button/touch can still wake PETBOT.
++  if (mood == "SLEEPY") return;
+   if (!micEnabled) return; // prevent floating GPIO34 from causing false interactions
+   const unsigned long now = millis();
+   if (now - lastSoundSample < 25) return;
+@@ -509,6 +527,10 @@ void drawFace() {
+   const bool annoyed = mood == "ANNOYED" || squint;
+   const bool alreadyClosedLook = mood == "HAPPY" || mood == "SHY" || mood == "SLEEPY" || excitedAction;
+   const bool sleepy = !eyesOpen || mood == "SLEEPY";
++  // Preserve the supplied reference's lively side-glances while awake, but
++  // keep all gaze animation still in sleep.
++  if (sleepy) { gazeX = gazeY = 0.0f; gazeTargetX = gazeTargetY = 0.0f; }
+   const bool lidsDown = sleepy || (blinking && !alreadyClosedLook);
+ 
+   // Extra life: pupils drift slightly even while the robot is idle.
+@@ -1498,7 +1520,7 @@ void updateMicroAction() {
+   bool gazeMoved = (fabsf(gazeX - oldX) > 0.15f || fabsf(gazeY - oldY) > 0.15f);
+ 
+-  if (now < moodOverrideUntil || mood == "SLEEPY" || petEnergy < 18) {
++  if (now < moodOverrideUntil || mood == "SLEEPY" || petEnergy < 18) {
+     gazeTargetX = 0.0f;
+     gazeTargetY = 0.0f;
+     microAction = "";
