@@ -50,7 +50,7 @@ jobs:
           cp "$BIN" release/petbot.bin
           cp "$BUILD/bootloader.bin" "$BUILD/partitions.bin" "$BUILD/boot_app0.bin" "$BUILD/firmware.bin" tools/usb-flash/flash.bat release/
           cp tools/usb-flash/README.txt release/README.txt
-          (cd release && zip -q -r ../PETBOT-USB-preserve-settings.zip .)
+          python -c 'import os,zipfile; p="release"; z=zipfile.ZipFile("PETBOT-USB-preserve-settings.zip","w",zipfile.ZIP_DEFLATED); [z.write(os.path.join(p,f),f) for f in os.listdir(p) if f != "manifest.txt"]; z.close()'
           printf '%s\n%s\n' "$VERSION" "$MD5" > release/manifest.txt
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
