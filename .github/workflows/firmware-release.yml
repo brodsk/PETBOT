@@ -49,14 +49,7 @@ jobs:
           mkdir -p release
           cp "$BIN" release/petbot.bin
           cp "$BUILD/bootloader.bin" "$BUILD/partitions.bin" "$BUILD/boot_app0.bin" "$BUILD/firmware.bin" tools/usb-flash/flash.bat release/
-          cat > release/README.txt <<'EOF'
-PETBOT USB INSTALLER (Windows)
-
-Extract PETBOT-USB-preserve-settings.zip and run flash.bat.
-The script installs esptool (Python 3 required) and flashes the bootloader,
-partition table, OTA boot data and firmware without erasing NVS.
-Saved Wi-Fi credentials and device settings are preserved.
-EOF
+          cp tools/usb-flash/README.txt release/README.txt
           (cd release && zip -q -r ../PETBOT-USB-preserve-settings.zip .)
           printf '%s\n%s\n' "$VERSION" "$MD5" > release/manifest.txt
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
