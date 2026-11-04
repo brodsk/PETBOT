@@ -1585,7 +1585,7 @@ class FirmwareUpdateStream : public Stream {
   int peek() override { return -1; }
   void flush() override {}
   size_t write(uint8_t value) override { return Update.write(&value, 1); }
-  size_t write(const uint8_t* buffer, size_t size) override { return Update.write(buffer, size); }
+  size_t write(const uint8_t* buffer, size_t size) override { return Update.write(const_cast<uint8_t*>(buffer), size); }
 };
 
 // Internet OTA: manifest format is two lines: version, then MD5 checksum.
