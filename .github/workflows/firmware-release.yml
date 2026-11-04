@@ -32,6 +32,13 @@ jobs:
           VERSION=$(grep -oP 'FIRMWARE_VERSION = "\K[^"]+' firmware/PETBOT_ESP32.ino)
           BIN=".pio/build/petbot/firmware.bin"
           test -s "$BIN"
+          SIZE=$(stat -c%s "$BIN")
+          MAX_SIZE=$((0x1E0000))
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "Firmware is ${SIZE} bytes; OTA slot limit is ${MAX_SIZE} bytes" >&2
+            exit 1
+          fi
+          echo "Firmware size: ${SIZE}/${MAX_SIZE} bytes"
           MD5=$(md5sum "$BIN" | cut -d' ' -f1)
           TAG="firmware-$VERSION"
           mkdir -p release
