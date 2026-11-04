@@ -15,22 +15,39 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-
       - name: Install PlatformIO
         run: pip install platformio
-
       - name: Build PETBOT
         run: pio run -e petbot
-
-      - name: Upload firmware binary
+      - name: Create full USB flash image
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD=".pio/build/petbot"
+          ESPTOOL="$HOME/.platformio/packages/tool-esptoolpy/esptool.py"
+          for file in bootloader.bin partitions.bin boot_app0.bin firmware.bin; do
+            test -s "$BUILD/$file"
+          done
+          python "$ESPTOOL" --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o "$BUILD/PETBOT-full-flash.bin" \
+            0x1000 "$BUILD/bootloader.bin" \
+            0x8000 "$BUILD/partitions.bin" \
+            0xe000 "$BUILD/boot_app0.bin" \
+            0x10000 "$BUILD/firmware.bin"
+          test -s "$BUILD/PETBOT-full-flash.bin"
+          ls -lh "$BUILD/PETBOT-full-flash.bin"
+      - name: Upload firmware binaries
         uses: actions/upload-artifact@v4
         with:
-          name: PETBOT-firmware
-          path: .pio/build/petbot/firmware.bin
+          name: PETBOT-USB-flash
+          path: |
+            .pio/build/petbot/firmware.bin
+            .pio/build/petbot/PETBOT-full-flash.bin
+            .pio/build/petbot/partitions.bin
           if-no-files-found: error
           retention-days: 30
