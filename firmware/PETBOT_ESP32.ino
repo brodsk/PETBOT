@@ -18,7 +18,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.4.0";
+const char* FIRMWARE_VERSION = "petbot-3.5.0";
 const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 
 #define SCREEN_WIDTH 128
@@ -178,6 +178,11 @@ uint8_t voiceCodeForMood(const String& m) {
   if (m == "CONFUSED") return 11;
   if (m == "BORED") return 12;
   if (m == "SCARED") return 13;
+  if (m == "PLAYFUL") return 14;
+  if (m == "DIZZY") return 15;
+  if (m == "SUSPICIOUS") return 16;
+  if (m == "FRUSTRATED") return 17;
+  if (m == "ECSTATIC") return 18;
   return 8;
 }
 
@@ -282,6 +287,11 @@ static void buildVoice(uint8_t code, bool idle) {
       vAdd(3000, 3000, 260, VM_TRILL); vRest(70);
       vAdd(2400, 2000, 160, VM_TRILL);
       break;
+    case 14: vAdd(1200, 2100, 90, VM_CHIRP); vRest(35); vAdd(1900, 1300, 90, VM_BURBLE); vRest(30); vAdd(1500, 2400, 110, VM_TRILL); break;
+    case 15: vAdd(1900, 900, 260, VM_VIBRATO); vRest(45); vAdd(1500, 700, 240, VM_BURBLE); break;
+    case 16: vAdd(650, 850, 150, VM_PURR); vRest(90); vAdd(800, 1200, 180, VM_GLIDE); break;
+    case 17: vAdd(520, 380, 130, VM_PURR); vRest(35); vAdd(560, 340, 190, VM_VIBRATO); break;
+    case 18: vAdd(1700, 2800, 70, VM_CHIRP); vRest(20); vAdd(2200, 3300, 75, VM_CHIRP); vAdd(3000, 3000, 220, VM_TRILL); break;
     default:
       vAdd(1200, 1200, 55, VM_BURBLE);
       vAdd(1300, 1000, 80, VM_CHIRP);
@@ -493,8 +503,10 @@ void drawFace() {
   else if (mood == "LOVE") bobY = -0.8f * sinf(t * 0.007f);
   else if (mood == "SAD") bobY = 1.0f + 0.8f * sinf(t * 0.0025f);
   else if (mood == "BORED") bobY = 0.8f * sinf(t * 0.002f);
-  else if (mood == "SCARED") swayX = 1.6f * sinf(t * 0.11f) + 0.8f * sinf(t * 0.23f);
+  else if (mood == "SCARED" || mood == "DIZZY") swayX = 1.6f * sinf(t * (mood == "DIZZY" ? 0.018f : 0.11f)) + 0.8f * sinf(t * 0.23f);
   else if (mood == "SHY") swayX = 2.0f * sinf(t * 0.0035f);
+  else if (mood == "PLAYFUL" || mood == "ECSTATIC") bobY = -2.0f * fabsf(sinf(t * 0.012f));
+  else if (mood == "FRUSTRATED") bobY = 0.7f * sinf(t * 0.025f);
 
   const int leftX = 37 + (int)roundf(swayX);
   const int rightX = 91 + (int)roundf(swayX);
@@ -505,8 +517,8 @@ void drawFace() {
   const int glanceY = (int)roundf(gazeY);
   const bool excitedAction = microAction == "EXCITED";
   const bool squint = microAction == "SQUINT";
-  const bool happy = mood == "HAPPY" || excitedAction;
-  const bool annoyed = mood == "ANNOYED" || squint;
+  const bool happy = mood == "HAPPY" || mood == "PLAYFUL" || mood == "ECSTATIC" || excitedAction;
+  const bool annoyed = mood == "ANNOYED" || mood == "FRUSTRATED" || squint;
   const bool alreadyClosedLook = mood == "HAPPY" || mood == "SHY" || mood == "SLEEPY" || excitedAction;
   const bool sleepy = !eyesOpen || mood == "SLEEPY";
   const bool lidsDown = sleepy || (blinking && !alreadyClosedLook);
@@ -553,6 +565,31 @@ void drawFace() {
       display.fillCircle(62, hy, 2, SSD1306_WHITE);
       display.fillCircle(66, hy, 2, SSD1306_WHITE);
       display.fillTriangle(60, hy + 1, 68, hy + 1, 64, hy + 6, SSD1306_WHITE);
+    }
+  } else if (mood == "DIZZY") {
+    // Rotating spiral-like pupils.
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      const int phase = (int)((t / 90UL + i * 3) % 12UL);
+      display.drawCircle(ex, eyeY, 12, SSD1306_WHITE);
+      display.drawCircle(ex, eyeY, 7, SSD1306_WHITE);
+      display.drawLine(ex, eyeY, ex + (int)roundf(9.0f * cosf(phase * 0.52f)), eyeY + (int)roundf(9.0f * sinf(phase * 0.52f)), SSD1306_WHITE);
+    }
+  } else if (mood == "SUSPICIOUS") {
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.fillRoundRect(ex - 14, eyeY - 12, 28, 27, 9, SSD1306_WHITE);
+      display.fillCircle(ex + (i == 0 ? 7 : -7), eyeY + 3, 5, SSD1306_BLACK);
+      display.fillRect(ex - 15, eyeY - 15, 30, 13, SSD1306_BLACK);
+      display.drawLine(ex - 13, eyeY - 2, ex + 13, eyeY - 2, SSD1306_WHITE);
+    }
+  } else if (mood == "FRUSTRATED") {
+    const int jitter = (int)((t / 75UL) % 3UL) - 1;
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.fillRoundRect(ex - 13, eyeY - 8 + jitter, 26, 20, 7, SSD1306_WHITE);
+      display.fillCircle(ex + (i == 0 ? 2 : -2), eyeY + 2, 6, SSD1306_BLACK);
+      display.drawLine(ex - 14, eyeY - 18 + jitter, ex + 12, eyeY - 10, SSD1306_WHITE);
     }
   } else if (mood == "SAD") {
     // Drooping lids, pupils low, a tear that rolls down.
@@ -621,6 +658,20 @@ void drawFace() {
       for (int k = 0; k < 3; k++) {
         display.drawLine(ex - 9 + k * 6, eyeY + 17, ex - 6 + k * 6, eyeY + 13, SSD1306_WHITE);
       }
+    }
+  } else if (mood == "ECSTATIC") {
+    const int pulse = 10 + (int)roundf(4.0f * fabsf(sinf(t * 0.018f)));
+    for (int i = 0; i < 2; i++) {
+      const int ex = eyeCx[i];
+      display.fillCircle(ex, eyeY, pulse, SSD1306_WHITE);
+      display.fillCircle(ex + (i ? -3 : 3), eyeY - 1, 5, SSD1306_BLACK);
+      display.fillCircle(ex + (i ? -5 : 1), eyeY - 4, 2, SSD1306_WHITE);
+    }
+    for (int k = 0; k < 4; k++) {
+      const int x = 18 + k * 30;
+      const int y = 16 + (int)roundf(3.0f * sinf(t * 0.02f + k));
+      display.drawLine(x - 3, y, x + 3, y, SSD1306_WHITE);
+      display.drawLine(x, y - 3, x, y + 3, SSD1306_WHITE);
     }
   } else if (mood == "EXCITED") {
     // Huge shining eyes that bounce, with flickering sparkles.
@@ -696,6 +747,15 @@ void drawFace() {
     display.drawCircle(64, mouthY, 3, SSD1306_WHITE);
   } else if (annoyed) {
     display.drawLine(60, mouthY, 68, mouthY - 2, SSD1306_WHITE);
+  } else if (mood == "DIZZY") {
+    display.drawLine(58, mouthY - 2, 70, mouthY + 2, SSD1306_WHITE);
+    display.drawLine(58, mouthY + 2, 70, mouthY - 2, SSD1306_WHITE);
+  } else if (mood == "SUSPICIOUS") {
+    display.drawLine(58, mouthY + 1, 64, mouthY - 1, SSD1306_WHITE);
+    display.drawLine(64, mouthY - 1, 70, mouthY + 1, SSD1306_WHITE);
+  } else if (mood == "FRUSTRATED") {
+    display.drawLine(58, mouthY + 1, 64, mouthY - 2, SSD1306_WHITE);
+    display.drawLine(64, mouthY - 2, 70, mouthY + 1, SSD1306_WHITE);
   } else if (mood == "CONFUSED") {
     display.drawLine(60, mouthY, 64, mouthY - 2, SSD1306_WHITE);
     display.drawLine(64, mouthY - 2, 68, mouthY + 1, SSD1306_WHITE);
@@ -858,7 +918,9 @@ void applyChatEvent(String face, String impulse, bool faceAlreadyApplied) {
       face == "HAPPY" || face == "CURIOUS" || face == "SLEEPY" ||
       face == "SURPRISED" || face == "ANNOYED" || face == "LOVE" ||
       face == "SAD" || face == "EXCITED" || face == "SHY" ||
-      face == "CONFUSED" || face == "BORED" || face == "SCARED";
+      face == "CONFUSED" || face == "BORED" || face == "SCARED" ||
+      face == "PLAYFUL" || face == "DIZZY" || face == "SUSPICIOUS" ||
+      face == "FRUSTRATED" || face == "ECSTATIC";
   if (validFace) {
     mood = face;
     lastCloudMood = face;
@@ -889,7 +951,9 @@ void handlePollResponse(const String& response) {
       receivedMood == "LOVE" ||
       receivedMood == "SAD" || receivedMood == "EXCITED" ||
       receivedMood == "SHY" || receivedMood == "CONFUSED" ||
-      receivedMood == "BORED" || receivedMood == "SCARED";
+      receivedMood == "BORED" || receivedMood == "SCARED" ||
+      receivedMood == "PLAYFUL" || receivedMood == "DIZZY" || receivedMood == "SUSPICIOUS" ||
+      receivedMood == "FRUSTRATED" || receivedMood == "ECSTATIC";
 
   bool moodAppliedNow = false;
   if (validMood && receivedMood != lastCloudMood) {
@@ -921,7 +985,9 @@ void handlePollResponse(const String& response) {
       command == "ANNOYED" || command == "LOVE" ||
       command == "SAD" || command == "EXCITED" ||
       command == "SHY" || command == "CONFUSED" ||
-      command == "BORED" || command == "SCARED") {
+      command == "BORED" || command == "SCARED" ||
+      command == "PLAYFUL" || command == "DIZZY" || command == "SUSPICIOUS" ||
+      command == "FRUSTRATED" || command == "ECSTATIC") {
     if (command != lastCloudMood) {
       lastCloudMood = command;
       mood = command;
@@ -989,7 +1055,7 @@ void printPetbotHelp() {
   Serial.println("PLAY - happy sound");
   Serial.println("SOUND:ON / SOUND:OFF");
   Serial.println("TOUCH:ON / TOUCH:OFF / TOUCH:READ - optional touch wire on GPIO4");
-  Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD / PURR - test voice phrases");
+  Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD|PLAYFUL|DIZZY|SUSPICIOUS|FRUSTRATED|ECSTATIC / PURR");
   Serial.println("MIC:ON / MIC:OFF - enable or disable analog sound input");
   Serial.println("MIC:THRESHOLD=240 - set sound sensitivity (50..1500)");
   Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
@@ -1327,8 +1393,9 @@ void updatePhysicalInput() {
 }
 
 static unsigned long blinkGapFor(const String& m) {
-  if (m == "EXCITED") return 900UL + (esp_random() % 1400UL);
-  if (m == "SCARED") return 3500UL + (esp_random() % 3000UL);
+  if (m == "EXCITED" || m == "ECSTATIC" || m == "PLAYFUL") return 700UL + (esp_random() % 1200UL);
+  if (m == "SCARED" || m == "SUSPICIOUS") return 3000UL + (esp_random() % 2600UL);
+  if (m == "DIZZY") return 500UL + (esp_random() % 900UL);
   if (m == "SLEEPY" || m == "BORED") return 2600UL + (esp_random() % 3200UL);
   if (m == "SURPRISED") return 2800UL + (esp_random() % 2500UL);
   return 1200UL + (esp_random() % 2200UL);
@@ -1336,6 +1403,7 @@ static unsigned long blinkGapFor(const String& m) {
 
 static unsigned long blinkLengthFor(const String& m) {
   if (m == "SLEEPY") return 380UL;
+  if (m == "DIZZY" || m == "FRUSTRATED") return 65UL;
   if (m == "BORED") return 280UL;
   if (m == "SCARED") return 70UL;
   if (m == "EXCITED") return 90UL;
@@ -1453,6 +1521,7 @@ String chooseAutonomousMood(const String& current) {
   const uint32_t roll = esp_random() % 100;
 
   if (petConfidence < 18 && petStimulation >= 55) return roll < 60 ? "SCARED" : "ANNOYED";
+  if (petStimulation >= 78 && petMoodValue >= 72) return roll < 55 ? "ECSTATIC" : "EXCITED";
   if (petStimulation >= 60 && petMoodValue >= 55) return roll < 60 ? "EXCITED" : "HAPPY";
   if (petStimulation >= 72) return roll < 72 ? "SURPRISED" : "CURIOUS";
   if (petAttachment < 25 && idleFor < 20000UL && roll < 30) return "SHY";
@@ -1462,7 +1531,9 @@ String chooseAutonomousMood(const String& current) {
     return roll < 72 ? "SAD" : "CURIOUS";
   }
   if (petEnergy < 28) return "SLEEPY";
-  if (petConfidence < 24 && petStimulation >= 35) return roll < 60 ? "ANNOYED" : "CURIOUS";
+  if (petConfidence < 24 && petStimulation >= 35) return roll < 55 ? "FRUSTRATED" : "SUSPICIOUS";
+  if (petCuriosity >= 82 && idleFor < 45000UL && roll < 22) return "PLAYFUL";
+  if (petCuriosity >= 72 && petStimulation > 40 && roll < 12) return "DIZZY";
   if (petMoodValue < 30 && idleFor > 60000UL) return roll < 65 ? "SAD" : "CURIOUS";
   if (petCuriosity >= 68) return roll < 58 ? "CURIOUS" : roll < 82 ? "SURPRISED" : "HAPPY";
   if (petMoodValue >= 72 && petSocialNeed < 55) return roll < 55 ? "HAPPY" : "CURIOUS";
