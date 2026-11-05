@@ -21,7 +21,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.3";
+const char* FIRMWARE_VERSION = "petbot-3.6.4";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -35,12 +35,12 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define OLED_SDA 21
 #define OLED_SCL 22
 
-// Optional sound hardware: passive piezo on GPIO25; analog microphone OUT on GPIO34.
+// Optional hardware: passive piezo on GPIO25; IR obstacle sensor TX on GPIO34.
 #define PETBOT_PIEZO_PIN 25
-#define PETBOT_MIC_PIN 34
+#define PETBOT_IR_PIN 34
+#define PETBOT_IR_ACTIVE_LEVEL LOW  // Common active-low obstacle sensor output; verify during testing.
 #define PETBOT_BATTERY_PIN 35
 #define PETBOT_BATTERY_DIVIDER 2.0f
-#define PETBOT_MIC_THRESHOLD_DEFAULT 8  // Lower ADC delta = higher microphone sensitivity.
 #define PETBOT_BUTTON_PIN 0  // BOOT button on most T3 V1.6.1 boards, active low
 #define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
 bool touchEnabled = false;
@@ -77,13 +77,15 @@ unsigned long moodChangedAt = 0;
 bool displayReady = false;
 unsigned long lastSoundSample = 0;
 unsigned long lastInteractionAt = 0;
-bool micEnabled = true; // microphone sound reactions enabled by default
+bool irEnabled = true; // IR obstacle sensor enabled by default
 unsigned long lastSoundEvent = 0;
 unsigned long nextIdleSoundAt = 0;
 unsigned long lastMoodSoundAt = 0;
-int micBaseline = 0;
-int micPeak = 0;
-int micThreshold = PETBOT_MIC_THRESHOLD_DEFAULT;
+int irStableLevel = HIGH;
+int irCandidateLevel = HIGH;
+unsigned long irCandidateSince = 0;
+unsigned long irLastEventAt = 0;
+bool irInitialized = false;
 bool soundEnabled = true;
 volatile bool voiceActive = false;
 volatile uint32_t lastVoiceEndedAt = 0;
@@ -434,49 +436,46 @@ void updateSoundPersonality() {
   }
 }
 
-void sampleMicrophone() {
-  // Ignore ambient noise while asleep; physical button/touch can still wake PETBOT.
-  if (mood == "SLEEPY") return;
-  if (!micEnabled || voiceActive) return; // ignore Jupiter's own piezo vocalizations
+void sampleIRSensor() {
+  if (!irEnabled) return;
   const unsigned long now = millis();
-  if (now - lastVoiceEndedAt < 180UL) return; // allow the piezo and microphone to settle
-  if (now - lastSoundSample < 10UL) return;
-  lastSoundSample = now;
+  const int level = digitalRead(PETBOT_IR_PIN);
 
-  const int sample = analogRead(PETBOT_MIC_PIN);
-
-  // Follow the microphone's DC bias slowly and track short sound peaks.
-  // This detects acoustic events, not words or speech content.
-  if (micBaseline == 0) micBaseline = sample;
-  const int deviation = abs(sample - micBaseline);
-  micBaseline = (micBaseline * 31 + sample) / 32;
-
-  static int soundEnvelope = 0;
-  static uint8_t aboveThresholdSamples = 0;
-  soundEnvelope = max(deviation, (soundEnvelope * 7) / 8);
-  if (soundEnvelope > micThreshold) {
-    aboveThresholdSamples = min((int)aboveThresholdSamples + 1, 5);
-  } else if (aboveThresholdSamples > 0) {
-    aboveThresholdSamples--;
+  if (!irInitialized) {
+    irStableLevel = level;
+    irCandidateLevel = level;
+    irCandidateSince = now;
+    irInitialized = true;
+    Serial.printf("IR sensor ready: GPIO%d initial level=%d (active=%d)\\n", PETBOT_IR_PIN, level, PETBOT_IR_ACTIVE_LEVEL);
+    return;
   }
 
-  if (aboveThresholdSamples >= 2 &&
-      now - lastSoundEvent > 900UL) {
-    aboveThresholdSamples = 0;
-    lastSoundEvent = now;
-    registerPetInteraction(false);
-    mood = "SURPRISED";
-    moodOverrideUntil = now + 2200UL;
-    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
-    gazeTargetX = (esp_random() & 1) ? -4.0f : 4.0f;
-    gazeTargetY = -1.0f;
-    microAction = "HEARD_SOUND";
-    microActionUntil = now + 650UL;
-    drawFace();
-    playRobotSound("SURPRISED");
-    Serial.printf("PETBOT sound: adc=%d baseline=%d delta=%d envelope=%d\n",
-                  sample, micBaseline, deviation, soundEnvelope);
+  if (level != irCandidateLevel) {
+    irCandidateLevel = level;
+    irCandidateSince = now;
+    return;
   }
+
+  // Ignore short TX glitches; a real obstacle state must remain stable for 35 ms.
+  if (level == irStableLevel || now - irCandidateSince < 35UL) return;
+  irStableLevel = level;
+  Serial.printf("IR sensor GPIO%d stable level=%d\\n", PETBOT_IR_PIN, level);
+
+  // Trigger only when the sensor reports its configured active obstacle level.
+  if (level != PETBOT_IR_ACTIVE_LEVEL || now - irLastEventAt < 1000UL) return;
+  irLastEventAt = now;
+  lastSoundEvent = now;
+  registerPetInteraction(false);
+  mood = "SURPRISED";
+  moodOverrideUntil = now + 2200UL;
+  nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+  gazeTargetX = (esp_random() & 1) ? -4.0f : 4.0f;
+  gazeTargetY = -1.0f;
+  microAction = "OBSTACLE";
+  microActionUntil = now + 900UL;
+  drawFace();
+  playRobotSound("SURPRISED");
+  Serial.println("PETBOT IR: obstacle detected");
 }
 
 String jsonStringField(const String& json, const String& key) {
@@ -1236,16 +1235,15 @@ void handlePollResponse(const String& response) {
 
 void printPetbotHelp() {
   Serial.println("PETBOT commands:");
-  Serial.println("STATUS - connection, mood, sound, mic threshold, interactions");
+  Serial.println("STATUS - connection, mood, sound, IR sensor, interactions");
   Serial.println("HELP - show commands");
   Serial.println("PET - affectionate reaction");
   Serial.println("PLAY - happy sound");
   Serial.println("SOUND:ON / SOUND:OFF");
   Serial.println("TOUCH:ON / TOUCH:OFF / TOUCH:READ - optional touch wire on GPIO4");
   Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD|PLAYFUL|DIZZY|SUSPICIOUS|FRUSTRATED|ECSTATIC / PURR");
-  Serial.println("MIC:ON / MIC:OFF - enable or disable analog sound input");
-  Serial.println("MIC:THRESHOLD=8 - set sound sensitivity (3..1500; lower = more sensitive)");
-  Serial.println("MIC:CAL - sample quiet-room baseline for 3 seconds");
+  Serial.println("IR:ON / IR:OFF - enable or disable IR obstacle sensor on GPIO34");
+  Serial.println("IR:READ - read current IR sensor TX logic level");
   Serial.println("NEEDS - show all internal state dimensions");
   Serial.println("EVENT:SOUND / EVENT:SUCCESS / EVENT:FAIL - simulate sensor/outcome");
   Serial.println("WAKE / SLEEP - test sleep and wake behavior");
@@ -1291,8 +1289,8 @@ void handleSerialProvisioning() {
     Serial.println(String("Wi-Fi connected: ") + (WiFi.status() == WL_CONNECTED ? "YES" : "NO"));
     Serial.println(String("Mood: ") + mood);
     Serial.println(String("Sound enabled: ") + (soundEnabled ? "YES" : "NO"));
-    Serial.println(String("Mic enabled: ") + (micEnabled ? "YES" : "NO"));
-    Serial.println(String("Mic threshold: ") + micThreshold);
+    Serial.println(String("IR enabled: ") + (irEnabled ? "YES" : "NO"));
+    Serial.println(String("IR GPIO34 level: ") + digitalRead(PETBOT_IR_PIN));
     Serial.println(String("Interactions: ") + interactionCount);
     Serial.println(String("Needs C/E/M/A: ") + petCuriosity + "/" + petEnergy + "/" + petMoodValue + "/" + petAttachment);
     Serial.println(String("Vector model S/S/C: ") + petStimulation + "/" + petSocialNeed + "/" + petConfidence);
@@ -1387,51 +1385,20 @@ void handleSerialProvisioning() {
     petbotPrefs.putBool("sound", false);
     petbotPrefs.end();
     Serial.println("Sound muted.");
-  } else if (line == "MIC:ON") {
-    micEnabled = true;
+  } else if (line == "IR:ON") {
+    irEnabled = true;
     petbotPrefs.begin("petbot", false);
-    petbotPrefs.putBool("mic_enabled", true);
+    petbotPrefs.putBool("ir_enabled", true);
     petbotPrefs.end();
-    Serial.println("Mic input enabled. Confirm sensor output is safe for GPIO34 (0-3.3V).");
-  } else if (line == "MIC:OFF") {
-    micEnabled = false;
+    Serial.println("IR obstacle sensor enabled.");
+  } else if (line == "IR:OFF") {
+    irEnabled = false;
     petbotPrefs.begin("petbot", false);
-    petbotPrefs.putBool("mic_enabled", false);
+    petbotPrefs.putBool("ir_enabled", false);
     petbotPrefs.end();
-    Serial.println("Mic input disabled.");
-  } else if (line.startsWith("MIC:THRESHOLD=")) {
-    int value = line.substring(14).toInt();
-    if (value >= 3 && value <= 1500) {
-      micThreshold = value;
-      petbotPrefs.begin("petbot", false);
-      petbotPrefs.putInt("mic_threshold", micThreshold);
-      petbotPrefs.end();
-      Serial.println(String("Mic threshold set to ") + micThreshold);
-    } else {
-      Serial.println("Threshold must be between 15 and 1500.");
-    }
-  } else if (line == "MIC:CAL") {
-    Serial.println("Calibrating microphone for 3 seconds. Keep the room quiet...");
-    long total = 0;
-    int minimum = 4095;
-    int maximum = 0;
-    const unsigned long started = millis();
-    uint32_t count = 0;
-    while (millis() - started < 3000UL) {
-      int value = analogRead(PETBOT_MIC_PIN);
-      total += value;
-      minimum = min(minimum, value);
-      maximum = max(maximum, value);
-      count++;
-      delay(5);
-    }
-    micBaseline = count ? (int)(total / (long)count) : 0;
-    int noiseSpan = maximum - minimum;
-    micThreshold = constrain(noiseSpan * 3, 15, 1500);
-    petbotPrefs.begin("petbot", false);
-    petbotPrefs.putInt("mic_threshold", micThreshold);
-    petbotPrefs.end();
-    Serial.printf("Mic calibrated: baseline=%d noise-span=%d threshold=%d\n", micBaseline, noiseSpan, micThreshold);
+    Serial.println("IR obstacle sensor disabled.");
+  } else if (line == "IR:READ") {
+    Serial.printf("IR GPIO34 level=%d; configured obstacle level=%d\\n", digitalRead(PETBOT_IR_PIN), PETBOT_IR_ACTIVE_LEVEL);
   } else if (line.length()) {
     Serial.println("Unknown command. Type HELP.");
   }
@@ -1694,29 +1661,19 @@ void setup() {
   Serial.begin(115200);
   pinMode(PETBOT_PIEZO_PIN, OUTPUT);
   xTaskCreatePinnedToCore(voiceTask, "petbot_voice", 4096, NULL, 1, NULL, 0);
-  pinMode(PETBOT_MIC_PIN, INPUT);
+  pinMode(PETBOT_IR_PIN, INPUT);
   pinMode(PETBOT_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PETBOT_BUTTON_PIN), onButtonEdge, CHANGE);
   analogReadResolution(12);
   analogSetPinAttenuation(PETBOT_BATTERY_PIN, ADC_11db);
   pinMode(PETBOT_BATTERY_PIN, INPUT);
-  analogSetPinAttenuation(PETBOT_MIC_PIN, ADC_11db);
 
   petbotPrefs.begin("petbot", false);
   deviceToken = petbotPrefs.getString("device_token", "");
   petName = petbotPrefs.getString("pet_name", "Jupiter");
   petbotPrefs.putString("pet_name", "Jupiter");
   soundEnabled = petbotPrefs.getBool("sound", true);
-  micEnabled = true;
-  petbotPrefs.putBool("mic_enabled", true);
-  touchEnabled = petbotPrefs.getBool("touch_en", false);
-  if (!petbotPrefs.getBool("mic_threshold_8_applied", false)) {
-    micThreshold = PETBOT_MIC_THRESHOLD_DEFAULT;
-    petbotPrefs.putInt("mic_threshold", micThreshold);
-    petbotPrefs.putBool("mic_threshold_8_applied", true);
-  } else {
-    micThreshold = petbotPrefs.getInt("mic_threshold", PETBOT_MIC_THRESHOLD_DEFAULT);
-  }
+  irEnabled = petbotPrefs.getBool("ir_enabled", true);
   interactionCount = petbotPrefs.getUInt("interactions", 0);
   petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
   petEnergy = constrain(petbotPrefs.getInt("energy", 88), 0, 100);
@@ -1736,7 +1693,8 @@ void setup() {
       String("Device token configured: ") +
       (deviceToken.length() >= 32 ? "YES" : "NO")
   );
-  Serial.println(String("Mic threshold: ") + micThreshold + " | sound: " + (soundEnabled ? "ON" : "OFF"));
+  Serial.println(String("IR sensor GPIO34: ") + (irEnabled ? "ENABLED" : "DISABLED") + " | sound: " + (soundEnabled ? "ON" : "OFF"));
+  Serial.println("IMPORTANT: IR TX must be a 0-3.3V logic output before connection to GPIO34.");
   printPetbotHelp();
 
   Wire.begin(OLED_SDA, OLED_SCL);
@@ -2029,7 +1987,7 @@ void loop() {
   updateAutonomousMood();
   updateMicroAction();
   updatePhysicalInput();
-  sampleMicrophone();
+  sampleIRSensor();
   updateSoundPersonality();
 
   if (WiFi.status() != WL_CONNECTED) {
