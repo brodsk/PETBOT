@@ -18,10 +18,11 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "petbot_face_bitmaps.h"
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.5";
+const char* FIRMWARE_VERSION = "petbot-3.6.6";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -564,6 +565,51 @@ void updateBattery() {
   drawFace();
 }
 
+
+static uint8_t petbotFaceOpen[704];
+static uint8_t petbotFaceGlance[704];
+static bool petbotFaceBitmapsReady = false;
+
+static int petbotB64Value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+static void decodePetbotFace(const char* encoded, uint8_t* bitmap) {
+  uint8_t packed[340];
+  size_t packedLen = 0;
+  uint32_t acc = 0;
+  int bits = 0;
+  for (size_t i = 0; encoded[i] && encoded[i] != '='; ++i) {
+    const int v = petbotB64Value(encoded[i]);
+    if (v < 0) continue;
+    acc = (acc << 6) | (uint32_t)v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (packedLen < sizeof(packed)) packed[packedLen++] = (uint8_t)((acc >> bits) & 0xFF);
+    }
+  }
+  size_t out = 0;
+  for (size_t i = 0; i + 1 < packedLen && out < 704; i += 2) {
+    const uint8_t count = packed[i];
+    const uint8_t value = packed[i + 1];
+    for (uint16_t n = 0; n < count && out < 704; ++n) bitmap[out++] = value;
+  }
+  while (out < 704) bitmap[out++] = 0;
+}
+
+static void ensurePetbotFaceBitmaps() {
+  if (petbotFaceBitmapsReady) return;
+  decodePetbotFace(PETBOT_FACE_OPEN_RLE, petbotFaceOpen);
+  decodePetbotFace(PETBOT_FACE_GLANCE_RLE, petbotFaceGlance);
+  petbotFaceBitmapsReady = true;
+}
+
 void drawFace() {
   if (!displayReady) return;
 
@@ -658,60 +704,39 @@ void drawFace() {
   const int pupilDriftY = (int)roundf(glanceY + lifeWaveY);
   const int eyeCx[2] = {leftX, rightX};
 
-  // JUPITER signature face: large soft rectangular eyes based on the
-  // uploaded reference. Gaze, mood and blinking remain fully animated.
-  const int faceLeftX = 48;
-  const int faceRightX = 80;
-  const int faceEyeY = 31 + (int)roundf(bobY * 0.35f);
-  const int faceEyeW = 27;
-  const int faceEyeH = 35;
+  // The primary face is drawn from the exact bitmap assets supplied by the user.
+  // ImageArray1 is the normal face; ImageArray2 is the asymmetric glance frame.
+  ensurePetbotFaceBitmaps();
+  const bool useGlance =
+      microAction == "LOOK_LEFT" || microAction == "LOOK_RIGHT" ||
+      microAction == "LOOK_DIAGONAL" || microAction == "LOOK_AROUND" ||
+      microAction == "FOLLOW" || microAction == "GLANCE" ||
+      mood == "CURIOUS" || mood == "CONFUSED" || mood == "SUSPICIOUS";
+  const uint8_t* faceBitmap = useGlance ? petbotFaceGlance : petbotFaceOpen;
+  const int faceY = (int)roundf(bobY * 0.25f);
+  display.drawBitmap(20, faceY, faceBitmap, 88, 64, SSD1306_WHITE);
+
+  // Blink and sleep are overlays on the supplied face, not replacement eyes.
   if (lidsDown) {
-    const int slitH = mood == "SLEEPY"
-        ? 7 + (int)roundf(1.5f * sinf(t * 0.003f))
-        : 5;
-    display.fillRoundRect(faceLeftX - faceEyeW / 2, faceEyeY - slitH / 2,
-                          faceEyeW, slitH, 3, SSD1306_WHITE);
-    display.fillRoundRect(faceRightX - faceEyeW / 2, faceEyeY - slitH / 2,
-                          faceEyeW, slitH, 3, SSD1306_WHITE);
+    display.fillRect(20, 9 + faceY, 88, 30, SSD1306_BLACK);
+    const int lidY = mood == "SLEEPY" ? 25 + (int)roundf(1.5f * sinf(t * 0.003f)) : 24;
+    display.drawLine(29, lidY, 99, lidY, SSD1306_WHITE);
     if (mood == "SLEEPY") {
       const int phase = (int)((t / 650UL) % 4UL);
       if (phase >= 1) { display.setCursor(108, 21); display.print("z"); }
       if (phase >= 2) { display.setCursor(114, 12); display.print("Z"); }
     }
-  } else {
-    // The white eye silhouettes are the defining look from the uploaded face.
-    const int eyeYLeft = faceEyeY + (int)roundf(glanceY * 0.25f);
-    const int eyeYRight = faceEyeY - (int)roundf(glanceY * 0.25f);
-    display.fillRoundRect(faceLeftX - faceEyeW / 2, eyeYLeft - faceEyeH / 2,
-                          faceEyeW, faceEyeH, 9, SSD1306_WHITE);
-    display.fillRoundRect(faceRightX - faceEyeW / 2, eyeYRight - faceEyeH / 2,
-                          faceEyeW, faceEyeH, 9, SSD1306_WHITE);
-
-    int pupilRadius = (mood == "SURPRISED" || mood == "SCARED") ? 3 : 5;
-    if (mood == "BORED" || mood == "SLEEPY") pupilRadius = 6;
-    if (mood == "EXCITED" || mood == "ECSTATIC") pupilRadius = 4;
-    const int pupilXLeft = faceLeftX + constrain(glanceX, -7, 7);
-    const int pupilXRight = faceRightX + constrain(glanceX, -7, 7);
-    const int pupilYLeft = eyeYLeft + constrain(glanceY, -5, 5);
-    const int pupilYRight = eyeYRight + constrain(glanceY, -5, 5);
-    display.fillCircle(pupilXLeft, pupilYLeft, pupilRadius, SSD1306_BLACK);
-    display.fillCircle(pupilXRight, pupilYRight, pupilRadius, SSD1306_BLACK);
-    display.drawPixel(pupilXLeft - 2, pupilYLeft - 2, SSD1306_WHITE);
-    display.drawPixel(pupilXRight - 2, pupilYRight - 2, SSD1306_WHITE);
-
-    if (mood == "BORED" || mood == "ANNOYED" || mood == "FRUSTRATED" ||
-        mood == "SUSPICIOUS") {
-      const int lidY = faceEyeY - 8;
-      display.fillRect(faceLeftX - 15, lidY - 5, 30, 12, SSD1306_BLACK);
-      display.fillRect(faceRightX - 15, lidY - 5, 30, 12, SSD1306_BLACK);
-      if (mood == "ANNOYED" || mood == "FRUSTRATED") {
-        display.drawLine(faceLeftX - 13, lidY + 3, faceLeftX + 11, lidY + 8, SSD1306_WHITE);
-        display.drawLine(faceRightX - 11, lidY + 8, faceRightX + 13, lidY + 3, SSD1306_WHITE);
-      }
+  } else if (mood == "BORED" || mood == "ANNOYED" ||
+             mood == "FRUSTRATED" || mood == "SUSPICIOUS") {
+    display.fillRect(20, 9 + faceY, 88, 8, SSD1306_BLACK);
+    display.drawLine(28, 18 + faceY, 99, 18 + faceY, SSD1306_WHITE);
+    if (mood == "ANNOYED" || mood == "FRUSTRATED") {
+      display.drawLine(29, 17 + faceY, 54, 22 + faceY, SSD1306_WHITE);
+      display.drawLine(74, 22 + faceY, 99, 17 + faceY, SSD1306_WHITE);
     }
-    if (mood == "SCARED") {
-      display.drawPixel(faceRightX + 19, 16 + (int)((t / 180UL) % 5UL), SSD1306_WHITE);
-    }
+  } else if (blinking) {
+    display.fillRect(20, 9 + faceY, 88, 30, SSD1306_BLACK);
+    display.drawLine(29, 24 + faceY, 99, 24 + faceY, SSD1306_WHITE);
   }
 
   // Mouth: every emotion has its own.
