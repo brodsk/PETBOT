@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v3.6.0
+  PETBOT firmware v3.6.5
   Board: LILYGO T3 V1.6.1 / classic ESP32
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
@@ -21,7 +21,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.4";
+const char* FIRMWARE_VERSION = "petbot-3.6.5";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -658,193 +658,59 @@ void drawFace() {
   const int pupilDriftY = (int)roundf(glanceY + lifeWaveY);
   const int eyeCx[2] = {leftX, rightX};
 
+  // JUPITER signature face: large soft rectangular eyes based on the
+  // uploaded reference. Gaze, mood and blinking remain fully animated.
+  const int faceLeftX = 48;
+  const int faceRightX = 80;
+  const int faceEyeY = 31 + (int)roundf(bobY * 0.35f);
+  const int faceEyeW = 27;
+  const int faceEyeH = 35;
   if (lidsDown) {
-    // Closed eyes: a breathing line while asleep, a quick shutter for a blink.
-    const int bh = (mood == "SLEEPY") ? 8 + (int)roundf(1.5f * sinf(t * 0.003f)) : 7;
-    for (int i = 0; i < 2; i++) display.fillRoundRect(eyeCx[i] - eyeW / 2, eyeY - bh / 2, eyeW, bh, 3, SSD1306_WHITE);
+    const int slitH = mood == "SLEEPY"
+        ? 7 + (int)roundf(1.5f * sinf(t * 0.003f))
+        : 5;
+    display.fillRoundRect(faceLeftX - faceEyeW / 2, faceEyeY - slitH / 2,
+                          faceEyeW, slitH, 3, SSD1306_WHITE);
+    display.fillRoundRect(faceRightX - faceEyeW / 2, faceEyeY - slitH / 2,
+                          faceEyeW, slitH, 3, SSD1306_WHITE);
     if (mood == "SLEEPY") {
-      const int phase = (int)((t / 650UL) % 4UL);  // z, then Z, drifting up
+      const int phase = (int)((t / 650UL) % 4UL);
       if (phase >= 1) { display.setCursor(108, 21); display.print("z"); }
       if (phase >= 2) { display.setCursor(114, 12); display.print("Z"); }
     }
-  } else if (mood == "BORED") {
-    // Heavy lids, a slow side-to-side stare.
-    const int gx = (int)roundf(6.0f * sinf(t * 0.0012f));
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.fillRoundRect(ex - eyeW / 2, eyeY - 14, eyeW, 28, 10, SSD1306_WHITE);
-      display.fillCircle(ex + gx, eyeY + 5, 6, SSD1306_BLACK);
-      display.fillRect(ex - eyeW / 2 - 1, eyeY - 16, eyeW + 2, 17, SSD1306_BLACK);
-      display.drawLine(ex - 13, eyeY - 4, ex + 13, eyeY - 4, SSD1306_WHITE);
-    }
-  } else if (mood == "LOVE") {
-    // Pixel hearts that beat; a tiny heart floats up between the eyes.
-    const float pulse = 1.0f + 0.14f * sinf(t * 0.014f) + onset * 0.25f;
-    const int r = (int)roundf(5.0f * pulse);
-    for (int i = 0; i < 2; i++) {
-      const int cx = eyeCx[i] + glanceX;
-      const int cy = eyeY - 2 + glanceY;
-      display.fillCircle(cx - r, cy - 2, r, SSD1306_WHITE);
-      display.fillCircle(cx + r, cy - 2, r, SSD1306_WHITE);
-      display.fillTriangle(cx - 2 * r, cy, cx + 2 * r, cy, cx, cy + (int)roundf(13.0f * pulse), SSD1306_WHITE);
-    }
-    const int hy = 45 - (int)((t % 2400UL) / 80UL);
-    if (hy > 17) {
-      display.fillCircle(62, hy, 2, SSD1306_WHITE);
-      display.fillCircle(66, hy, 2, SSD1306_WHITE);
-      display.fillTriangle(60, hy + 1, 68, hy + 1, 64, hy + 6, SSD1306_WHITE);
-    }
-  } else if (mood == "DIZZY") {
-    // Rotating spiral-like pupils.
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      const int phase = (int)((t / 90UL + i * 3) % 12UL);
-      display.drawCircle(ex, eyeY, 12, SSD1306_WHITE);
-      display.drawCircle(ex, eyeY, 7, SSD1306_WHITE);
-      display.drawLine(ex, eyeY, ex + (int)roundf(9.0f * cosf(phase * 0.52f)), eyeY + (int)roundf(9.0f * sinf(phase * 0.52f)), SSD1306_WHITE);
-    }
-  } else if (mood == "SUSPICIOUS") {
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.fillRoundRect(ex - 14, eyeY - 12, 28, 27, 9, SSD1306_WHITE);
-      display.fillCircle(ex + (i == 0 ? 7 : -7), eyeY + 3, 5, SSD1306_BLACK);
-      display.fillRect(ex - 15, eyeY - 15, 30, 13, SSD1306_BLACK);
-      display.drawLine(ex - 13, eyeY - 2, ex + 13, eyeY - 2, SSD1306_WHITE);
-    }
-  } else if (mood == "FRUSTRATED") {
-    const int jitter = (int)((t / 75UL) % 3UL) - 1;
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.fillRoundRect(ex - 13, eyeY - 8 + jitter, 26, 20, 7, SSD1306_WHITE);
-      display.fillCircle(ex + (i == 0 ? 2 : -2), eyeY + 2, 6, SSD1306_BLACK);
-      display.drawLine(ex - 14, eyeY - 18 + jitter, ex + 12, eyeY - 10, SSD1306_WHITE);
-    }
-  } else if (mood == "SAD") {
-    // Drooping lids, pupils low, a tear that rolls down.
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.fillRoundRect(ex - 14, eyeY - 12, 28, 27, 10, SSD1306_WHITE);
-      display.fillRect(ex - 15, eyeY - 13, 30, 9, SSD1306_BLACK);
-      display.fillCircle(ex + pupilDriftX, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
-    }
-    display.drawLine(leftX - 13, eyeY - 18, leftX + 5, eyeY - 12, SSD1306_WHITE);
-    display.drawLine(rightX - 5, eyeY - 12, rightX + 13, eyeY - 18, SSD1306_WHITE);
-    const int tp = (int)(t % 2800UL);
-    if (tp < 1800) {
-      const int ty = eyeY + 11 + tp / 100;
-      if (ty < 62) {
-        display.fillCircle(leftX - 8, ty, 2, SSD1306_WHITE);
-        display.drawPixel(leftX - 8, ty - 3, SSD1306_WHITE);
-      }
-    }
-  } else if (mood == "SCARED") {
-    // Trembling wide eyes, tiny darting pupils, a sweat drop.
-    const int grow = (int)roundf(onset * 3.0f);
-    const int dart = (int)((t / 220UL) % 3UL) - 1;
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.drawRoundRect(ex - 14 - grow, eyeY - 17 - grow, 28 + 2 * grow, 34 + 2 * grow, 10, SSD1306_WHITE);
-      display.fillCircle(ex + dart * 3, eyeY + pupilDriftY, 3, SSD1306_WHITE);
-    }
-    display.drawLine(leftX - 13, eyeY - 21, leftX + 8, eyeY - 16, SSD1306_WHITE);
-    display.drawLine(rightX - 8, eyeY - 16, rightX + 13, eyeY - 21, SSD1306_WHITE);
-    const int sy = 17 + (int)((t / 180UL) % 5UL);
-    display.fillCircle(rightX + 19, sy, 2, SSD1306_WHITE);
-    display.drawPixel(rightX + 19, sy - 3, SSD1306_WHITE);
-  } else if (mood == "SURPRISED") {
-    // Eyes pop open wide, then settle; pupils start tiny and relax.
-    const int grow = (int)roundf(onset * 4.0f);
-    const int ps = 3 + (int)roundf((1.0f - onset) * 4.0f);
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.drawRoundRect(ex - 14 - grow, eyeY - 17 - grow, 28 + 2 * grow, 34 + 2 * grow, 10 + grow, SSD1306_WHITE);
-      display.fillCircle(ex + pupilDriftX, eyeY + pupilDriftY, ps, SSD1306_WHITE);
-      display.fillCircle(ex + pupilDriftX, eyeY + pupilDriftY, 2, SSD1306_BLACK);
-      display.drawLine(ex - 8, eyeY - 21 - grow / 2, ex + 8, eyeY - 21 - grow / 2, SSD1306_WHITE);
-    }
-  } else if (mood == "CONFUSED") {
-    // Mismatched eyes that look around, and a "?" that bobs.
-    const int sw = (int)roundf(3.0f * sinf(t * 0.004f));
-    display.fillRoundRect(leftX - 14, eyeY - 13, 28, 29, 10, SSD1306_WHITE);
-    display.fillRoundRect(rightX - 14, eyeY - 18, 28, 34, 10, SSD1306_WHITE);
-    display.fillCircle(leftX + pupilDriftX - 2 + sw, eyeY + 4 + pupilDriftY, 5, SSD1306_BLACK);
-    display.fillCircle(rightX + pupilDriftX + 2 - sw, eyeY - 2 + pupilDriftY, 5, SSD1306_BLACK);
-    display.drawLine(leftX - 12, eyeY - 20, leftX + 8, eyeY - 17, SSD1306_WHITE);
-    display.drawLine(rightX - 8, eyeY - 22, rightX + 12, eyeY - 16, SSD1306_WHITE);
-    display.setTextSize(2);
-    display.setCursor(110, 14 + (int)roundf(2.0f * sinf(t * 0.006f)));
-    display.print("?");
-    display.setTextSize(1);
-  } else if (mood == "SHY") {
-    // Happy-closed eyes, looking away with a sway, blushing cheeks.
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.drawLine(ex - 12, eyeY + 3, ex, eyeY - 5, SSD1306_WHITE);
-      display.drawLine(ex, eyeY - 5, ex + 12, eyeY + 3, SSD1306_WHITE);
-      display.drawLine(ex - 12, eyeY + 4, ex, eyeY - 4, SSD1306_WHITE);
-      display.drawLine(ex, eyeY - 4, ex + 12, eyeY + 4, SSD1306_WHITE);
-      for (int k = 0; k < 3; k++) {
-        display.drawLine(ex - 9 + k * 6, eyeY + 17, ex - 6 + k * 6, eyeY + 13, SSD1306_WHITE);
-      }
-    }
-  } else if (mood == "ECSTATIC") {
-    const int pulse = 10 + (int)roundf(4.0f * fabsf(sinf(t * 0.018f)));
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.fillCircle(ex, eyeY, pulse, SSD1306_WHITE);
-      display.fillCircle(ex + (i ? -3 : 3), eyeY - 1, 5, SSD1306_BLACK);
-      display.fillCircle(ex + (i ? -5 : 1), eyeY - 4, 2, SSD1306_WHITE);
-    }
-    for (int k = 0; k < 4; k++) {
-      const int x = 18 + k * 30;
-      const int y = 16 + (int)roundf(3.0f * sinf(t * 0.02f + k));
-      display.drawLine(x - 3, y, x + 3, y, SSD1306_WHITE);
-      display.drawLine(x, y - 3, x, y + 3, SSD1306_WHITE);
-    }
-  } else if (mood == "EXCITED") {
-    // Huge shining eyes that bounce, with flickering sparkles.
-    const int r = 13 + (int)roundf(onset * 3.0f);
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      const int px = ex + (int)roundf(3.0f * sinf(t * 0.02f + i));
-      const int py = eyeY + (int)roundf(2.0f * cosf(t * 0.017f));
-      display.fillCircle(ex, eyeY, r, SSD1306_WHITE);
-      display.fillCircle(px, py, 8, SSD1306_BLACK);
-      display.fillCircle(px - 3, py - 3, 3, SSD1306_WHITE);
-      display.fillCircle(px + 3, py + 3, 1, SSD1306_WHITE);
-    }
-    const int sp = (int)((t / 150UL) % 4UL);
-    const int sx[3] = {22, 106, 64};
-    const int sy2[3] = {18, 20, 15};
-    for (int k = 0; k < 3; k++) {
-      if (k == sp || k == (sp + 1) % 4) {
-        display.drawLine(sx[k] - 3, sy2[k], sx[k] + 3, sy2[k], SSD1306_WHITE);
-        display.drawLine(sx[k], sy2[k] - 3, sx[k], sy2[k] + 3, SSD1306_WHITE);
-      }
-    }
-  } else if (happy) {
-    // Reference-sheet style: sharp playful > < eyes with animated cheek marks.
-    const int squeeze = (int)roundf(2.0f * fabsf(sinf(t * 0.009f)));
-    display.drawLine(leftX - 15, eyeY - 10 + squeeze, leftX + 12, eyeY, SSD1306_WHITE);
-    display.drawLine(leftX - 15, eyeY + 10 - squeeze, leftX + 12, eyeY, SSD1306_WHITE);
-    display.drawLine(rightX + 15, eyeY - 10 + squeeze, rightX - 12, eyeY, SSD1306_WHITE);
-    display.drawLine(rightX + 15, eyeY + 10 - squeeze, rightX - 12, eyeY, SSD1306_WHITE);
-    for (int k = 0; k < 3; k++) {
-      display.drawLine(leftX - 9 + k * 5, eyeY + 17, leftX - 12 + k * 5, eyeY + 21, SSD1306_WHITE);
-      display.drawLine(rightX - 9 + k * 5, eyeY + 17, rightX - 6 + k * 5, eyeY + 21, SSD1306_WHITE);
-    }
   } else {
-    // Reference-sheet curious face: round O eyes with pupils that gently wander.
-    const int pulse = 12 + (int)roundf(2.0f * sinf(t * 0.004f));
-    for (int i = 0; i < 2; i++) {
-      const int ex = eyeCx[i];
-      display.drawCircle(ex, eyeY, pulse, SSD1306_WHITE);
-      display.fillCircle(ex + pupilDriftX / 2, eyeY + pupilDriftY / 2, 4, SSD1306_WHITE);
-      display.drawCircle(ex + pupilDriftX / 2, eyeY + pupilDriftY / 2, 2, SSD1306_BLACK);
+    // The white eye silhouettes are the defining look from the uploaded face.
+    const int eyeYLeft = faceEyeY + (int)roundf(glanceY * 0.25f);
+    const int eyeYRight = faceEyeY - (int)roundf(glanceY * 0.25f);
+    display.fillRoundRect(faceLeftX - faceEyeW / 2, eyeYLeft - faceEyeH / 2,
+                          faceEyeW, faceEyeH, 9, SSD1306_WHITE);
+    display.fillRoundRect(faceRightX - faceEyeW / 2, eyeYRight - faceEyeH / 2,
+                          faceEyeW, faceEyeH, 9, SSD1306_WHITE);
+
+    int pupilRadius = (mood == "SURPRISED" || mood == "SCARED") ? 3 : 5;
+    if (mood == "BORED" || mood == "SLEEPY") pupilRadius = 6;
+    if (mood == "EXCITED" || mood == "ECSTATIC") pupilRadius = 4;
+    const int pupilXLeft = faceLeftX + constrain(glanceX, -7, 7);
+    const int pupilXRight = faceRightX + constrain(glanceX, -7, 7);
+    const int pupilYLeft = eyeYLeft + constrain(glanceY, -5, 5);
+    const int pupilYRight = eyeYRight + constrain(glanceY, -5, 5);
+    display.fillCircle(pupilXLeft, pupilYLeft, pupilRadius, SSD1306_BLACK);
+    display.fillCircle(pupilXRight, pupilYRight, pupilRadius, SSD1306_BLACK);
+    display.drawPixel(pupilXLeft - 2, pupilYLeft - 2, SSD1306_WHITE);
+    display.drawPixel(pupilXRight - 2, pupilYRight - 2, SSD1306_WHITE);
+
+    if (mood == "BORED" || mood == "ANNOYED" || mood == "FRUSTRATED" ||
+        mood == "SUSPICIOUS") {
+      const int lidY = faceEyeY - 8;
+      display.fillRect(faceLeftX - 15, lidY - 5, 30, 12, SSD1306_BLACK);
+      display.fillRect(faceRightX - 15, lidY - 5, 30, 12, SSD1306_BLACK);
+      if (mood == "ANNOYED" || mood == "FRUSTRATED") {
+        display.drawLine(faceLeftX - 13, lidY + 3, faceLeftX + 11, lidY + 8, SSD1306_WHITE);
+        display.drawLine(faceRightX - 11, lidY + 8, faceRightX + 13, lidY + 3, SSD1306_WHITE);
+      }
     }
-    if (mood == "ANNOYED") {
-      display.drawLine(leftX - 15, eyeY - 17, leftX + 7, eyeY - 11, SSD1306_WHITE);
-      display.drawLine(rightX - 7, eyeY - 11, rightX + 15, eyeY - 17, SSD1306_WHITE);
+    if (mood == "SCARED") {
+      display.drawPixel(faceRightX + 19, 16 + (int)((t / 180UL) % 5UL), SSD1306_WHITE);
     }
   }
 
