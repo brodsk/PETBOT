@@ -2,7 +2,7 @@
   PETBOT firmware v3.6.7
   Board: LILYGO T3 V1.6.1 / classic ESP32
   Features: local Vector-inspired behavior model, seven internal drives,
-  OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
+  OLED face with animated eyes/mouth, autonomous gaze, piezo sound motifs, optional cloud commands.
   Core behavior continues without Wi-Fi after a bounded provisioning attempt.
   GPIO34 analog sound input is disabled by default. Motors and camera are not present.
 */
