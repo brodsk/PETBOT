@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v3.6.5
+  PETBOT firmware v3.6.7
   Board: LILYGO T3 V1.6.1 / classic ESP32
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
@@ -22,7 +22,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.6";
+const char* FIRMWARE_VERSION = "petbot-3.6.7";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
