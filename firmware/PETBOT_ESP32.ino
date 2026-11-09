@@ -737,10 +737,11 @@ void drawFace() {
   if (mood == "PLAYFUL") {
     const bool winkLeft = ((t / 850UL) % 2UL) == 0;
     if ((t % 1700UL) < 170UL) {
-      const int wx = winkLeft ? leftX : rightX;
-      display.fillRect(wx - 15, eyeY - 3, 30, 8, SSD1306_BLACK);
-      display.drawLine(wx - 13, eyeY + 2, wx, eyeY - 4, SSD1306_WHITE);
-      display.drawLine(wx, eyeY - 4, wx + 13, eyeY + 2, SSD1306_WHITE);
+      const int wx = faceX + (winkLeft ? 16 : 96);
+      const int winkY = faceY + 15;
+      display.fillRect(wx - 15, winkY - 3, 30, 8, SSD1306_BLACK);
+      display.drawLine(wx - 13, winkY + 2, wx, winkY - 4, SSD1306_WHITE);
+      display.drawLine(wx, winkY - 4, wx + 13, winkY + 2, SSD1306_WHITE);
     }
     const int sparkleY = 17 + (int)roundf(3.0f * sinf(phase * 1.7f));
     display.drawLine(64 - pulse, sparkleY, 64 + pulse, sparkleY, SSD1306_WHITE);
