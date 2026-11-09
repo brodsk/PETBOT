@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v3.6.7
+  PETBOT firmware v3.6.8
   Board: LILYGO T3 V1.6.1 / classic ESP32
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
@@ -19,6 +19,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "petbot_face_bitmaps.h"
+#include "petbot_face_reference.h"
 
 Preferences petbotPrefs;
 String deviceToken;
