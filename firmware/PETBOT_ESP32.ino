@@ -739,6 +739,24 @@ void drawFace() {
     display.drawLine(29, 24 + faceY, 99, 24 + faceY, SSD1306_WHITE);
   }
 
+  // Living pupils: gaze is rendered as moving highlights inside the supplied eye outlines.
+  // Keep the motion subtle so it reads as eye tracking rather than random jitter.
+  if (!lidsDown && !blinking) {
+    const float pupilBreathX = 0.55f * sinf((float)t * 0.0042f);
+    const float pupilBreathY = 0.35f * cosf((float)t * 0.0036f);
+    const int pupilRadius = (mood == "SURPRISED" || mood == "SCARED") ? 3 : 2;
+    const int pupilY = 32 + glanceY + (int)roundf(pupilBreathY);
+    const int leftPupilX = 37 + glanceX + (int)roundf(pupilBreathX);
+    const int rightPupilX = 91 + glanceX + (int)roundf(pupilBreathX);
+    display.fillCircle(leftPupilX, pupilY, pupilRadius, SSD1306_WHITE);
+    display.fillCircle(rightPupilX, pupilY, pupilRadius, SSD1306_WHITE);
+    // A tiny dark core gives the moving highlights a readable pupil shape.
+    if (pupilRadius >= 3) {
+      display.drawPixel(leftPupilX, pupilY, SSD1306_BLACK);
+      display.drawPixel(rightPupilX, pupilY, SSD1306_BLACK);
+    }
+  }
+
   // Mouth: every emotion has its own.
   const int mouthY = 56;
   if (lidsDown) {
