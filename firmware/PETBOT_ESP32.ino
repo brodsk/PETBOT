@@ -767,27 +767,38 @@ void drawFace() {
     }
   }
 
-  // Blink and sleep are overlays on the supplied face, not replacement eyes.
-  if (lidsDown) {
-    display.fillRect(20, 9 + faceY, 88, 30, SSD1306_BLACK);
-    const int lidY = mood == "SLEEPY" ? 25 + (int)roundf(1.5f * sinf(t * 0.003f)) : 24;
+  // Animated eyelids: blink closes and opens smoothly instead of snapping shut.
+  if (mood == "SLEEPY" || !eyesOpen) {
+    display.fillRect(28, 20 + faceY, 72, 23, SSD1306_BLACK);
+    const int lidY = 31 + (int)roundf(1.5f * sinf(t * 0.003f));
     display.drawLine(29, lidY, 99, lidY, SSD1306_WHITE);
     if (mood == "SLEEPY") {
-      const int phase = (int)((t / 650UL) % 4UL);
-      if (phase >= 1) { display.setCursor(108, 21); display.print("z"); }
-      if (phase >= 2) { display.setCursor(114, 12); display.print("Z"); }
+      const int zPhase = (int)((t / 650UL) % 4UL);
+      if (zPhase >= 1) { display.setCursor(108, 21); display.print("z"); }
+      if (zPhase >= 2) { display.setCursor(114, 12); display.print("Z"); }
     }
-  } else if (mood == "BORED" || mood == "ANNOYED" ||
-             mood == "FRUSTRATED" || mood == "SUSPICIOUS") {
-    display.fillRect(20, 9 + faceY, 88, 8, SSD1306_BLACK);
-    display.drawLine(28, 18 + faceY, 99, 18 + faceY, SSD1306_WHITE);
-    if (mood == "ANNOYED" || mood == "FRUSTRATED") {
-      display.drawLine(29, 17 + faceY, 54, 22 + faceY, SSD1306_WHITE);
-      display.drawLine(74, 22 + faceY, 99, 17 + faceY, SSD1306_WHITE);
+  } else if (blinking && !eyesClosedStyle) {
+    const unsigned long blinkDuration = max(1UL, blinkUntil - lastBlink);
+    const unsigned long blinkElapsed = min(blinkDuration, t - lastBlink);
+    const float blinkPhase = (float)blinkElapsed / (float)blinkDuration;
+    const float closeAmount = blinkPhase < 0.5f ? blinkPhase * 2.0f : (1.0f - blinkPhase) * 2.0f;
+    const int coverHeight = (int)roundf(22.0f * closeAmount);
+    if (coverHeight > 0) {
+      display.fillRect(28, 20 + faceY, 72, coverHeight, SSD1306_BLACK);
+      display.drawLine(29, 20 + faceY + coverHeight, 99, 20 + faceY + coverHeight, SSD1306_WHITE);
     }
-  } else if (blinking) {
-    display.fillRect(20, 9 + faceY, 88, 30, SSD1306_BLACK);
-    display.drawLine(29, 24 + faceY, 99, 24 + faceY, SSD1306_WHITE);
+  }
+
+  // Expressive brows distinguish suspicion, anger and surprise.
+  if (mood == "ANNOYED" || mood == "FRUSTRATED") {
+    display.drawLine(29, 18 + faceY, 52, 24 + faceY, SSD1306_WHITE);
+    display.drawLine(76, 24 + faceY, 99, 18 + faceY, SSD1306_WHITE);
+  } else if (mood == "SUSPICIOUS") {
+    display.drawLine(29, 19 + faceY, 52, 17 + faceY, SSD1306_WHITE);
+    display.drawLine(76, 17 + faceY, 99, 21 + faceY, SSD1306_WHITE);
+  } else if (mood == "SCARED" || mood == "SURPRISED") {
+    display.drawLine(29, 16 + faceY, 52, 13 + faceY, SSD1306_WHITE);
+    display.drawLine(76, 13 + faceY, 99, 16 + faceY, SSD1306_WHITE);
   }
 
   // Pupils glide independently within the open eye shapes; sleep and blinks hide them.
@@ -803,44 +814,50 @@ void drawFace() {
     display.drawPixel(eyeRight + glanceX - 1, pupilY - 1, SSD1306_WHITE);
   }
 
-  // Mouth: every emotion has its own.
-  const int mouthY = 56;
-  if (lidsDown) {
-    if (mood == "SLEEPY") display.drawCircle(64, mouthY, 1, SSD1306_WHITE);
+  // Mouth catalogue based on the user's expression sheet; small shapes stay legible at 128x64.
+  const int mouthY = 55 + (int)roundf(bobY * 0.15f);
+  const int mouthOpen = 3 + (int)roundf(2.0f * fabsf(sinf((float)t * 0.009f)));
+  if (mood == "SLEEPY" || !eyesOpen) {
+    display.drawLine(61, mouthY, 67, mouthY, SSD1306_WHITE);
+  } else if (mood == "HAPPY" || mood == "LOVE" || mood == "ECSTATIC" || mood == "PLAYFUL") {
+    display.drawLine(56, mouthY - 1, 60, mouthY + 2, SSD1306_WHITE);
+    display.drawLine(60, mouthY + 2, 64, mouthY + 3, SSD1306_WHITE);
+    display.drawLine(64, mouthY + 3, 68, mouthY + 2, SSD1306_WHITE);
+    display.drawLine(68, mouthY + 2, 72, mouthY - 1, SSD1306_WHITE);
+    if (mood == "ECSTATIC" || mood == "PLAYFUL") display.drawLine(61, mouthY + 1, 67, mouthY + 1, SSD1306_WHITE);
   } else if (mood == "EXCITED") {
-    display.fillCircle(64, mouthY - 2, 5, SSD1306_WHITE);
-    display.fillRect(58, mouthY - 8, 13, 6, SSD1306_BLACK);
-  } else if (happy || mood == "LOVE" || mood == "SHY") {
-    display.drawLine(59, mouthY - 1, 64, mouthY + 2, SSD1306_WHITE);
-    display.drawLine(64, mouthY + 2, 69, mouthY - 1, SSD1306_WHITE);
+    display.fillRoundRect(59, mouthY - 5, 10, 10 + mouthOpen, 4, SSD1306_WHITE);
+    display.drawLine(61, mouthY + 1, 67, mouthY + 1, SSD1306_BLACK);
+  } else if (mood == "SURPRISED" || mood == "CURIOUS") {
+    const int r = mood == "SURPRISED" ? 4 : 2 + (int)((t / 500UL) % 2UL);
+    display.drawCircle(64, mouthY, r, SSD1306_WHITE);
   } else if (mood == "SCARED") {
-    display.drawLine(56, mouthY, 60, mouthY - 3, SSD1306_WHITE);
-    display.drawLine(60, mouthY - 3, 64, mouthY + 1, SSD1306_WHITE);
-    display.drawLine(64, mouthY + 1, 68, mouthY - 3, SSD1306_WHITE);
-    display.drawLine(68, mouthY - 3, 72, mouthY, SSD1306_WHITE);
-  } else if (mood == "SURPRISED") {
-    display.drawCircle(64, mouthY, 3, SSD1306_WHITE);
-  } else if (annoyed) {
-    display.drawLine(60, mouthY, 68, mouthY - 2, SSD1306_WHITE);
-  } else if (mood == "DIZZY") {
-    display.drawLine(58, mouthY - 2, 70, mouthY + 2, SSD1306_WHITE);
-    display.drawLine(58, mouthY + 2, 70, mouthY - 2, SSD1306_WHITE);
-  } else if (mood == "SUSPICIOUS") {
-    display.drawLine(58, mouthY + 1, 64, mouthY - 1, SSD1306_WHITE);
-    display.drawLine(64, mouthY - 1, 70, mouthY + 1, SSD1306_WHITE);
-  } else if (mood == "FRUSTRATED") {
-    display.drawLine(58, mouthY + 1, 64, mouthY - 2, SSD1306_WHITE);
-    display.drawLine(64, mouthY - 2, 70, mouthY + 1, SSD1306_WHITE);
-  } else if (mood == "CONFUSED") {
-    display.drawLine(60, mouthY, 64, mouthY - 2, SSD1306_WHITE);
-    display.drawLine(64, mouthY - 2, 68, mouthY + 1, SSD1306_WHITE);
+    display.drawLine(56, mouthY - 1, 60, mouthY - 4, SSD1306_WHITE);
+    display.drawLine(60, mouthY - 4, 64, mouthY + 3, SSD1306_WHITE);
+    display.drawLine(64, mouthY + 3, 68, mouthY - 4, SSD1306_WHITE);
+    display.drawLine(68, mouthY - 4, 72, mouthY - 1, SSD1306_WHITE);
   } else if (mood == "SAD") {
-    display.drawLine(58, mouthY + 2, 64, mouthY - 2, SSD1306_WHITE);
-    display.drawLine(64, mouthY - 2, 70, mouthY + 2, SSD1306_WHITE);
+    display.drawLine(57, mouthY + 3, 61, mouthY - 1, SSD1306_WHITE);
+    display.drawLine(61, mouthY - 1, 67, mouthY - 1, SSD1306_WHITE);
+    display.drawLine(67, mouthY - 1, 71, mouthY + 3, SSD1306_WHITE);
   } else if (mood == "BORED") {
-    display.drawLine(58, mouthY + 1, 70, mouthY + 1, SSD1306_WHITE);
-  } else if (mood == "CURIOUS") {
-    display.drawCircle(64, mouthY, 2, SSD1306_WHITE);
+    const int yawnH = 3 + (int)roundf(3.0f * fabsf(sinf((float)t * 0.0018f)));
+    display.drawRoundRect(60, mouthY - yawnH / 2, 8, yawnH, 3, SSD1306_WHITE);
+  } else if (mood == "DIZZY") {
+    display.drawLine(59, mouthY - 2, 64, mouthY + 2, SSD1306_WHITE);
+    display.drawLine(64, mouthY + 2, 69, mouthY - 2, SSD1306_WHITE);
+  } else if (mood == "ANNOYED" || mood == "FRUSTRATED") {
+    display.drawLine(57, mouthY + 1, 63, mouthY - 1, SSD1306_WHITE);
+    display.drawLine(63, mouthY - 1, 71, mouthY + 1, SSD1306_WHITE);
+  } else if (mood == "SUSPICIOUS") {
+    display.drawLine(58, mouthY + 2, 64, mouthY, SSD1306_WHITE);
+    display.drawLine(64, mouthY, 70, mouthY + 2, SSD1306_WHITE);
+  } else if (mood == "CONFUSED") {
+    display.drawLine(59, mouthY - 1, 64, mouthY + 2, SSD1306_WHITE);
+    display.drawLine(64, mouthY + 2, 69, mouthY - 2, SSD1306_WHITE);
+  } else if (mood == "SHY") {
+    display.drawLine(60, mouthY, 64, mouthY + 2, SSD1306_WHITE);
+    display.drawLine(64, mouthY + 2, 68, mouthY, SSD1306_WHITE);
   } else {
     display.drawLine(61, mouthY, 67, mouthY, SSD1306_WHITE);
   }
