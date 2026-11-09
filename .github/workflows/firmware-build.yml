@@ -1,0 +1,35 @@
+name: PETBOT firmware build
+
+on:
+  push:
+    paths:
+      - "firmware/**"
+      - "platformio.ini"
+      - "partitions_ota.csv"
+      - ".github/workflows/firmware-build.yml"
+  pull_request:
+    paths:
+      - "firmware/**"
+      - "platformio.ini"
+      - "partitions_ota.csv"
+      - ".github/workflows/firmware-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PlatformIO
+        run: pip install platformio
+      - name: Build ESP32 firmware
+        run: pio run -e petbot
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: petbot-firmware
+          path: .pio/build/petbot/firmware.bin
+          if-no-files-found: error
