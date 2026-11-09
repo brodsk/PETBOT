@@ -22,7 +22,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.7";
+const char* FIRMWARE_VERSION = "petbot-3.6.8";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -668,198 +668,58 @@ void drawFace() {
     return;
   }
 
-  // ---- body language: bounce, tremble, sway, droop ----
+  // Reference-sheet face: use the actual 18 expressions digitized from the user's image.
   float bobY = 0.0f, swayX = 0.0f;
-  if (mood == "EXCITED") bobY = -3.0f * fabsf(sinf(t * 0.011f));
-  else if (mood == "HAPPY") bobY = -1.2f * sinf(t * 0.006f);
-  else if (mood == "LOVE") bobY = -0.8f * sinf(t * 0.007f);
-  else if (mood == "SAD") bobY = 1.0f + 0.8f * sinf(t * 0.0025f);
-  else if (mood == "BORED") bobY = 0.8f * sinf(t * 0.002f);
-  else if (mood == "SCARED" || mood == "DIZZY") swayX = 1.6f * sinf(t * (mood == "DIZZY" ? 0.018f : 0.11f)) + 0.8f * sinf(t * 0.23f);
-  else if (mood == "SHY") swayX = 2.0f * sinf(t * 0.0035f);
-  else if (mood == "PLAYFUL" || mood == "ECSTATIC") bobY = -2.0f * fabsf(sinf(t * 0.012f));
-  else if (mood == "FRUSTRATED") bobY = 0.7f * sinf(t * 0.025f);
+  if (mood == "EXCITED") bobY = -2.0f * fabsf(sinf(t * 0.011f));
+  else if (mood == "HAPPY" || mood == "ECSTATIC") bobY = -1.0f * sinf(t * 0.006f);
+  else if (mood == "LOVE") bobY = -0.7f * sinf(t * 0.007f);
+  else if (mood == "SAD" || mood == "SLEEPY") bobY = 1.0f + 0.6f * sinf(t * 0.0025f);
+  else if (mood == "SCARED" || mood == "DIZZY") swayX = 1.2f * sinf(t * 0.018f);
+  else if (mood == "SHY") swayX = 1.5f * sinf(t * 0.0035f);
+  else if (mood == "PLAYFUL" || mood == "BORED") bobY = -1.2f * fabsf(sinf(t * 0.012f));
 
-  const int leftX = 37 + (int)roundf(swayX);
-  const int rightX = 91 + (int)roundf(swayX);
-  const int eyeY = 34 + (int)roundf(bobY);
-  const int eyeW = 29;
-  const int eyeH = 35;
-  const int glanceX = (int)roundf(gazeX);
-  const int glanceY = (int)roundf(gazeY);
-  const bool excitedAction = microAction == "EXCITED";
-  const bool squint = microAction == "SQUINT";
-  const bool happy = mood == "HAPPY" || mood == "PLAYFUL" || mood == "ECSTATIC" || excitedAction;
-  const bool annoyed = mood == "ANNOYED" || mood == "FRUSTRATED" || squint;
-  const bool alreadyClosedLook = mood == "HAPPY" || mood == "SHY" || mood == "SLEEPY" || excitedAction;
-  const bool sleepy = !eyesOpen || mood == "SLEEPY";
-  // Keep gaze still while asleep; awake gaze remains expressive.
-  if (sleepy) { gazeX = gazeY = 0.0f; gazeTargetX = gazeTargetY = 0.0f; }
-  const bool lidsDown = sleepy || (blinking && !alreadyClosedLook);
+  uint8_t expression = 3; // open round eyes
+  if (mood == "HAPPY" || mood == "PLAYFUL") expression = 0;
+  else if (mood == "DIZZY") expression = 1;
+  else if (mood == "CURIOUS" || mood == "SURPRISED") expression = 2;
+  else if (mood == "CALM" || mood == "IDLE") expression = 3;
+  else if (mood == "SHY") expression = 4;
+  else if (mood == "ANGRY" || mood == "FRUSTRATED") expression = 5;
+  else if (mood == "CONFUSED") expression = 6;
+  else if (mood == "ANNOYED") expression = 7;
+  else if (mood == "EXCITED" || mood == "ECSTATIC") expression = 8;
+  else if (mood == "LOVE") expression = 9;
+  else if (mood == "SCARED") expression = 10;
+  else if (mood == "SAD") expression = 11;
+  else if (mood == "SUSPICIOUS") expression = 12;
+  else if (mood == "BORED") expression = 13;
+  else if (mood == "CONTENT") expression = 14;
+  else if (mood == "WINK") expression = 15;
+  else if (mood == "SLEEPY") expression = 16;
+  else if (mood == "TIRED") expression = 17;
 
-  // Extra life: pupils drift slightly even while the robot is idle.
-  const float lifeWaveX = 0.8f * sinf(t * 0.008f + 0.7f);
-  const float lifeWaveY = 0.7f * cosf(t * 0.01f + 1.3f);
-  const int pupilDriftX = (int)roundf(glanceX + lifeWaveX);
-  const int pupilDriftY = (int)roundf(glanceY + lifeWaveY);
-  const int eyeCx[2] = {leftX, rightX};
-
-  // Jupiter's expressive eye set: shapes change with mood while pupils track gaze.
-  // The hand-drawn reference sheet is translated into distinct eye silhouettes,
-  // rather than switching between two static face bitmaps.
-  const int faceY = (int)roundf(bobY * 0.25f);
-  const int eyeLeft = 42 + (int)roundf(swayX);
-  const int eyeRight = 86 + (int)roundf(swayX);
-  const int eyeCenterY = 32 + faceY;
-  const bool eyesClosedStyle = mood == "HAPPY" || mood == "PLAYFUL" ||
-      mood == "LOVE" || mood == "SHY" || mood == "ECSTATIC";
-  const bool eyesNarrowStyle = mood == "BORED" || mood == "ANNOYED" ||
-      mood == "FRUSTRATED" || mood == "SUSPICIOUS";
-  const bool eyesWideStyle = mood == "SURPRISED" || mood == "SCARED" ||
-      microAction == "WIDE_EYES";
-
-  if (mood == "DIZZY") {
-    // Spiral eyes echo the dizzy expression in the supplied reference.
-    for (int e = 0; e < 2; ++e) {
-      const int cx = e == 0 ? eyeLeft : eyeRight;
-      display.drawCircle(cx, eyeCenterY, 9, SSD1306_WHITE);
-      display.drawCircle(cx, eyeCenterY, 5, SSD1306_WHITE);
-      for (int k = 0; k < 9; ++k) {
-        const float a = (float)k * 0.72f + (float)t * 0.006f;
-        const int px = cx + (int)roundf((float)k * 0.85f * cosf(a));
-        const int py = eyeCenterY + (int)roundf((float)k * 0.65f * sinf(a));
-        display.drawPixel(px, py, SSD1306_WHITE);
-      }
-    }
-  } else if (eyesClosedStyle) {
-    // Happy / playful faces use curved closed eyes, with occasional asymmetric wink.
-    display.drawLine(eyeLeft - 10, eyeCenterY + 1, eyeLeft - 5, eyeCenterY - 5, SSD1306_WHITE);
-    display.drawLine(eyeLeft - 5, eyeCenterY - 5, eyeLeft, eyeCenterY - 7, SSD1306_WHITE);
-    display.drawLine(eyeLeft, eyeCenterY - 7, eyeLeft + 5, eyeCenterY - 5, SSD1306_WHITE);
-    display.drawLine(eyeLeft + 5, eyeCenterY - 5, eyeLeft + 10, eyeCenterY + 1, SSD1306_WHITE);
-    if (mood == "PLAYFUL" && ((t / 850UL) % 2UL) == 0) {
-      display.drawLine(eyeRight - 10, eyeCenterY, eyeRight, eyeCenterY - 1, SSD1306_WHITE);
-      display.drawLine(eyeRight, eyeCenterY - 1, eyeRight + 10, eyeCenterY, SSD1306_WHITE);
-    } else {
-      display.drawLine(eyeRight - 10, eyeCenterY + 1, eyeRight - 5, eyeCenterY - 5, SSD1306_WHITE);
-      display.drawLine(eyeRight - 5, eyeCenterY - 5, eyeRight, eyeCenterY - 7, SSD1306_WHITE);
-      display.drawLine(eyeRight, eyeCenterY - 7, eyeRight + 5, eyeCenterY - 5, SSD1306_WHITE);
-      display.drawLine(eyeRight + 5, eyeCenterY - 5, eyeRight + 10, eyeCenterY + 1, SSD1306_WHITE);
-    }
-  } else if (eyesNarrowStyle) {
-    // Half-lidded / irritated expressions.
-    display.fillRoundRect(eyeLeft - 11, eyeCenterY - 4, 22, 10, 5, SSD1306_WHITE);
-    display.fillRoundRect(eyeRight - 11, eyeCenterY - 4, 22, 10, 5, SSD1306_WHITE);
-    display.fillRect(eyeLeft - 12, eyeCenterY - 5, 24, 5, SSD1306_BLACK);
-    display.fillRect(eyeRight - 12, eyeCenterY - 5, 24, 5, SSD1306_BLACK);
-    if (mood == "ANNOYED" || mood == "FRUSTRATED") {
-      display.drawLine(eyeLeft - 12, eyeCenterY - 8, eyeLeft + 7, eyeCenterY - 3, SSD1306_WHITE);
-      display.drawLine(eyeRight - 7, eyeCenterY - 3, eyeRight + 12, eyeCenterY - 8, SSD1306_WHITE);
-    }
-  } else {
-    const int r = eyesWideStyle ? 11 : 9;
-    display.fillCircle(eyeLeft, eyeCenterY, r, SSD1306_WHITE);
-    display.fillCircle(eyeRight, eyeCenterY, r, SSD1306_WHITE);
-    // Confusion is intentionally asymmetric, like the tilted eyes in the reference.
-    if (mood == "CONFUSED" || microAction == "LOOK_DIAGONAL") {
-      display.fillRect(eyeRight - 11, eyeCenterY - 10, 22, 8, SSD1306_BLACK);
-      display.drawLine(eyeRight - 10, eyeCenterY - 5, eyeRight + 9, eyeCenterY - 8, SSD1306_WHITE);
-    }
+  // The bitmap itself is 56x24 and is doubled to 112x48 on the OLED.
+  // Small independent gaze drift is added to open round-eye expressions.
+  const int faceX = 8 + (int)roundf(swayX) + (int)constrain((int)roundf(gazeX), -2, 2);
+  const int faceY = 14 + (int)roundf(bobY * 0.25f);
+  drawFaceExpression(display, expression, faceX, faceY);
+  if (expression == 2 || expression == 3 || expression == 11) {
+    const int pupilShift = (int)constrain((int)roundf(gazeX), -2, 2);
+    const int pupilY = faceY + 20 + (int)constrain((int)roundf(gazeY), -1, 1);
+    display.fillCircle(faceX + 17 + pupilShift, pupilY, 2, SSD1306_BLACK);
+    display.fillCircle(faceX + 94 + pupilShift, pupilY, 2, SSD1306_BLACK);
+    display.drawPixel(faceX + 16 + pupilShift, pupilY - 1, SSD1306_WHITE);
+    display.drawPixel(faceX + 93 + pupilShift, pupilY - 1, SSD1306_WHITE);
   }
-
-  // Animated eyelids: blink closes and opens smoothly instead of snapping shut.
-  if (mood == "SLEEPY" || !eyesOpen) {
-    display.fillRect(28, 20 + faceY, 72, 23, SSD1306_BLACK);
-    const int lidY = 31 + (int)roundf(1.5f * sinf(t * 0.003f));
-    display.drawLine(29, lidY, 99, lidY, SSD1306_WHITE);
+  if (mood == "SLEEPY" || blinking) {
+    const int lidY = faceY + 15 + (int)roundf(1.5f * sinf(t * 0.003f));
+    display.fillRect(faceX + 4, faceY + 3, 104, 18, SSD1306_BLACK);
+    display.drawLine(faceX + 5, lidY, faceX + 107, lidY, SSD1306_WHITE);
     if (mood == "SLEEPY") {
       const int zPhase = (int)((t / 650UL) % 4UL);
       if (zPhase >= 1) { display.setCursor(108, 21); display.print("z"); }
       if (zPhase >= 2) { display.setCursor(114, 12); display.print("Z"); }
     }
-  } else if (blinking && !eyesClosedStyle) {
-    const unsigned long blinkDuration = max(1UL, blinkUntil - lastBlink);
-    const unsigned long blinkElapsed = min(blinkDuration, t - lastBlink);
-    const float blinkPhase = (float)blinkElapsed / (float)blinkDuration;
-    const float closeAmount = blinkPhase < 0.5f ? blinkPhase * 2.0f : (1.0f - blinkPhase) * 2.0f;
-    const int coverHeight = (int)roundf(22.0f * closeAmount);
-    if (coverHeight > 0) {
-      display.fillRect(28, 20 + faceY, 72, coverHeight, SSD1306_BLACK);
-      display.drawLine(29, 20 + faceY + coverHeight, 99, 20 + faceY + coverHeight, SSD1306_WHITE);
-    }
-  }
-
-  // Expressive brows distinguish suspicion, anger and surprise.
-  if (mood == "ANNOYED" || mood == "FRUSTRATED") {
-    display.drawLine(29, 18 + faceY, 52, 24 + faceY, SSD1306_WHITE);
-    display.drawLine(76, 24 + faceY, 99, 18 + faceY, SSD1306_WHITE);
-  } else if (mood == "SUSPICIOUS") {
-    display.drawLine(29, 19 + faceY, 52, 17 + faceY, SSD1306_WHITE);
-    display.drawLine(76, 17 + faceY, 99, 21 + faceY, SSD1306_WHITE);
-  } else if (mood == "SCARED" || mood == "SURPRISED") {
-    display.drawLine(29, 16 + faceY, 52, 13 + faceY, SSD1306_WHITE);
-    display.drawLine(76, 13 + faceY, 99, 16 + faceY, SSD1306_WHITE);
-  }
-
-  // Pupils glide independently within the open eye shapes; sleep and blinks hide them.
-  if (!lidsDown && !blinking && !eyesClosedStyle && !eyesNarrowStyle && mood != "DIZZY") {
-    const float driftX = 0.45f * sinf((float)t * 0.0042f);
-    const float driftY = 0.30f * cosf((float)t * 0.0036f);
-    const int pupilY = eyeCenterY + glanceY + (int)roundf(driftY);
-    const int pupilRadius = eyesWideStyle ? 3 : 3;
-    display.fillCircle(eyeLeft + glanceX + (int)roundf(driftX), pupilY, pupilRadius, SSD1306_BLACK);
-    display.fillCircle(eyeRight + glanceX + (int)roundf(driftX), pupilY, pupilRadius, SSD1306_BLACK);
-    // Tiny moving catchlights make the eyes feel wet and alive.
-    display.drawPixel(eyeLeft + glanceX - 1, pupilY - 1, SSD1306_WHITE);
-    display.drawPixel(eyeRight + glanceX - 1, pupilY - 1, SSD1306_WHITE);
-  }
-
-  // Mouth catalogue based on the user's expression sheet; small shapes stay legible at 128x64.
-  const int mouthY = 55 + (int)roundf(bobY * 0.15f);
-  const int mouthOpen = 3 + (int)roundf(2.0f * fabsf(sinf((float)t * 0.009f)));
-  if (mood == "SLEEPY" || !eyesOpen) {
-    display.drawLine(61, mouthY, 67, mouthY, SSD1306_WHITE);
-  } else if (mood == "HAPPY" || mood == "LOVE" || mood == "ECSTATIC" || mood == "PLAYFUL") {
-    display.drawLine(56, mouthY - 1, 60, mouthY + 2, SSD1306_WHITE);
-    display.drawLine(60, mouthY + 2, 64, mouthY + 3, SSD1306_WHITE);
-    display.drawLine(64, mouthY + 3, 68, mouthY + 2, SSD1306_WHITE);
-    display.drawLine(68, mouthY + 2, 72, mouthY - 1, SSD1306_WHITE);
-    if (mood == "ECSTATIC" || mood == "PLAYFUL") display.drawLine(61, mouthY + 1, 67, mouthY + 1, SSD1306_WHITE);
-  } else if (mood == "EXCITED") {
-    display.fillRoundRect(59, mouthY - 5, 10, 10 + mouthOpen, 4, SSD1306_WHITE);
-    display.drawLine(61, mouthY + 1, 67, mouthY + 1, SSD1306_BLACK);
-  } else if (mood == "SURPRISED" || mood == "CURIOUS") {
-    const int r = mood == "SURPRISED" ? 4 : 2 + (int)((t / 500UL) % 2UL);
-    display.drawCircle(64, mouthY, r, SSD1306_WHITE);
-  } else if (mood == "SCARED") {
-    display.drawLine(56, mouthY - 1, 60, mouthY - 4, SSD1306_WHITE);
-    display.drawLine(60, mouthY - 4, 64, mouthY + 3, SSD1306_WHITE);
-    display.drawLine(64, mouthY + 3, 68, mouthY - 4, SSD1306_WHITE);
-    display.drawLine(68, mouthY - 4, 72, mouthY - 1, SSD1306_WHITE);
-  } else if (mood == "SAD") {
-    display.drawLine(57, mouthY + 3, 61, mouthY - 1, SSD1306_WHITE);
-    display.drawLine(61, mouthY - 1, 67, mouthY - 1, SSD1306_WHITE);
-    display.drawLine(67, mouthY - 1, 71, mouthY + 3, SSD1306_WHITE);
-  } else if (mood == "BORED") {
-    const int yawnH = 3 + (int)roundf(3.0f * fabsf(sinf((float)t * 0.0018f)));
-    display.drawRoundRect(60, mouthY - yawnH / 2, 8, yawnH, 3, SSD1306_WHITE);
-  } else if (mood == "DIZZY") {
-    display.drawLine(59, mouthY - 2, 64, mouthY + 2, SSD1306_WHITE);
-    display.drawLine(64, mouthY + 2, 69, mouthY - 2, SSD1306_WHITE);
-  } else if (mood == "ANNOYED" || mood == "FRUSTRATED") {
-    display.drawLine(57, mouthY + 1, 63, mouthY - 1, SSD1306_WHITE);
-    display.drawLine(63, mouthY - 1, 71, mouthY + 1, SSD1306_WHITE);
-  } else if (mood == "SUSPICIOUS") {
-    display.drawLine(58, mouthY + 2, 64, mouthY, SSD1306_WHITE);
-    display.drawLine(64, mouthY, 70, mouthY + 2, SSD1306_WHITE);
-  } else if (mood == "CONFUSED") {
-    display.drawLine(59, mouthY - 1, 64, mouthY + 2, SSD1306_WHITE);
-    display.drawLine(64, mouthY + 2, 69, mouthY - 2, SSD1306_WHITE);
-  } else if (mood == "SHY") {
-    display.drawLine(60, mouthY, 64, mouthY + 2, SSD1306_WHITE);
-    display.drawLine(64, mouthY + 2, 68, mouthY, SSD1306_WHITE);
-  } else {
-    display.drawLine(61, mouthY, 67, mouthY, SSD1306_WHITE);
   }
 
   // Animated signature details: every mood has a living motion layer.
