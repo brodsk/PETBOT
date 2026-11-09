@@ -704,17 +704,68 @@ void drawFace() {
   const int pupilDriftY = (int)roundf(glanceY + lifeWaveY);
   const int eyeCx[2] = {leftX, rightX};
 
-  // The primary face is drawn from the exact bitmap assets supplied by the user.
-  // ImageArray1 is the normal face; ImageArray2 is the asymmetric glance frame.
-  ensurePetbotFaceBitmaps();
-  const bool useGlance =
-      microAction == "LOOK_LEFT" || microAction == "LOOK_RIGHT" ||
-      microAction == "LOOK_DIAGONAL" || microAction == "LOOK_AROUND" ||
-      microAction == "FOLLOW" || microAction == "GLANCE" ||
-      mood == "CURIOUS" || mood == "CONFUSED" || mood == "SUSPICIOUS";
-  const uint8_t* faceBitmap = useGlance ? petbotFaceGlance : petbotFaceOpen;
+  // Jupiter's expressive eye set: shapes change with mood while pupils track gaze.
+  // The hand-drawn reference sheet is translated into distinct eye silhouettes,
+  // rather than switching between two static face bitmaps.
   const int faceY = (int)roundf(bobY * 0.25f);
-  display.drawBitmap(20, faceY, faceBitmap, 88, 64, SSD1306_WHITE);
+  const int eyeLeft = 42 + (int)roundf(swayX);
+  const int eyeRight = 86 + (int)roundf(swayX);
+  const int eyeCenterY = 32 + faceY;
+  const bool eyesClosedStyle = mood == "HAPPY" || mood == "PLAYFUL" ||
+      mood == "LOVE" || mood == "SHY" || mood == "ECSTATIC";
+  const bool eyesNarrowStyle = mood == "BORED" || mood == "ANNOYED" ||
+      mood == "FRUSTRATED" || mood == "SUSPICIOUS";
+  const bool eyesWideStyle = mood == "SURPRISED" || mood == "SCARED" ||
+      microAction == "WIDE_EYES";
+
+  if (mood == "DIZZY") {
+    // Spiral eyes echo the dizzy expression in the supplied reference.
+    for (int e = 0; e < 2; ++e) {
+      const int cx = e == 0 ? eyeLeft : eyeRight;
+      display.drawCircle(cx, eyeCenterY, 9, SSD1306_WHITE);
+      display.drawCircle(cx, eyeCenterY, 5, SSD1306_WHITE);
+      for (int k = 0; k < 9; ++k) {
+        const float a = (float)k * 0.72f + (float)t * 0.006f;
+        const int px = cx + (int)roundf((float)k * 0.85f * cosf(a));
+        const int py = eyeCenterY + (int)roundf((float)k * 0.65f * sinf(a));
+        display.drawPixel(px, py, SSD1306_WHITE);
+      }
+    }
+  } else if (eyesClosedStyle) {
+    // Happy / playful faces use curved closed eyes, with occasional asymmetric wink.
+    display.drawLine(eyeLeft - 10, eyeCenterY + 1, eyeLeft - 5, eyeCenterY - 5, SSD1306_WHITE);
+    display.drawLine(eyeLeft - 5, eyeCenterY - 5, eyeLeft, eyeCenterY - 7, SSD1306_WHITE);
+    display.drawLine(eyeLeft, eyeCenterY - 7, eyeLeft + 5, eyeCenterY - 5, SSD1306_WHITE);
+    display.drawLine(eyeLeft + 5, eyeCenterY - 5, eyeLeft + 10, eyeCenterY + 1, SSD1306_WHITE);
+    if (mood == "PLAYFUL" && ((t / 850UL) % 2UL) == 0) {
+      display.drawLine(eyeRight - 10, eyeCenterY, eyeRight, eyeCenterY - 1, SSD1306_WHITE);
+      display.drawLine(eyeRight, eyeCenterY - 1, eyeRight + 10, eyeCenterY, SSD1306_WHITE);
+    } else {
+      display.drawLine(eyeRight - 10, eyeCenterY + 1, eyeRight - 5, eyeCenterY - 5, SSD1306_WHITE);
+      display.drawLine(eyeRight - 5, eyeCenterY - 5, eyeRight, eyeCenterY - 7, SSD1306_WHITE);
+      display.drawLine(eyeRight, eyeCenterY - 7, eyeRight + 5, eyeCenterY - 5, SSD1306_WHITE);
+      display.drawLine(eyeRight + 5, eyeCenterY - 5, eyeRight + 10, eyeCenterY + 1, SSD1306_WHITE);
+    }
+  } else if (eyesNarrowStyle) {
+    // Half-lidded / irritated expressions.
+    display.fillRoundRect(eyeLeft - 11, eyeCenterY - 4, 22, 10, 5, SSD1306_WHITE);
+    display.fillRoundRect(eyeRight - 11, eyeCenterY - 4, 22, 10, 5, SSD1306_WHITE);
+    display.fillRect(eyeLeft - 12, eyeCenterY - 5, 24, 5, SSD1306_BLACK);
+    display.fillRect(eyeRight - 12, eyeCenterY - 5, 24, 5, SSD1306_BLACK);
+    if (mood == "ANNOYED" || mood == "FRUSTRATED") {
+      display.drawLine(eyeLeft - 12, eyeCenterY - 8, eyeLeft + 7, eyeCenterY - 3, SSD1306_WHITE);
+      display.drawLine(eyeRight - 7, eyeCenterY - 3, eyeRight + 12, eyeCenterY - 8, SSD1306_WHITE);
+    }
+  } else {
+    const int r = eyesWideStyle ? 11 : 9;
+    display.fillCircle(eyeLeft, eyeCenterY, r, SSD1306_WHITE);
+    display.fillCircle(eyeRight, eyeCenterY, r, SSD1306_WHITE);
+    // Confusion is intentionally asymmetric, like the tilted eyes in the reference.
+    if (mood == "CONFUSED" || microAction == "LOOK_DIAGONAL") {
+      display.fillRect(eyeRight - 11, eyeCenterY - 10, 22, 8, SSD1306_BLACK);
+      display.drawLine(eyeRight - 10, eyeCenterY - 5, eyeRight + 9, eyeCenterY - 8, SSD1306_WHITE);
+    }
+  }
 
   // Blink and sleep are overlays on the supplied face, not replacement eyes.
   if (lidsDown) {
@@ -737,6 +788,19 @@ void drawFace() {
   } else if (blinking) {
     display.fillRect(20, 9 + faceY, 88, 30, SSD1306_BLACK);
     display.drawLine(29, 24 + faceY, 99, 24 + faceY, SSD1306_WHITE);
+  }
+
+  // Pupils glide independently within the open eye shapes; sleep and blinks hide them.
+  if (!lidsDown && !blinking && !eyesClosedStyle && !eyesNarrowStyle && mood != "DIZZY") {
+    const float driftX = 0.45f * sinf((float)t * 0.0042f);
+    const float driftY = 0.30f * cosf((float)t * 0.0036f);
+    const int pupilY = eyeCenterY + glanceY + (int)roundf(driftY);
+    const int pupilRadius = eyesWideStyle ? 3 : 3;
+    display.fillCircle(eyeLeft + glanceX + (int)roundf(driftX), pupilY, pupilRadius, SSD1306_BLACK);
+    display.fillCircle(eyeRight + glanceX + (int)roundf(driftX), pupilY, pupilRadius, SSD1306_BLACK);
+    // Tiny moving catchlights make the eyes feel wet and alive.
+    display.drawPixel(eyeLeft + glanceX - 1, pupilY - 1, SSD1306_WHITE);
+    display.drawPixel(eyeRight + glanceX - 1, pupilY - 1, SSD1306_WHITE);
   }
 
   // Mouth: every emotion has its own.
