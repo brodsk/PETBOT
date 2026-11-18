@@ -1,6 +1,6 @@
 /*
-  PETBOT firmware v3.6.8
-  Board: LILYGO T3 V1.6.1 / classic ESP32
+  PETBOT firmware v3.7.0-devkit
+  Board: ESP32 DevKit (classic ESP32)
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
   Core behavior continues without Wi-Fi after a bounded provisioning attempt.
@@ -12,7 +12,6 @@
 #include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
-#include "esp32_cert_bundle.h"
 #include <Update.h>
 #include <freertos/semphr.h>
 #include <Wire.h>
@@ -23,7 +22,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.6.8";
+const char* FIRMWARE_VERSION = "petbot-3.7.0-devkit";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -41,9 +40,9 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define PETBOT_PIEZO_PIN 25
 #define PETBOT_IR_PIN 34
 #define PETBOT_IR_ACTIVE_LEVEL LOW  // Common active-low obstacle sensor output; verify during testing.
-#define PETBOT_BATTERY_PIN 35
+#define PETBOT_BATTERY_PIN 35 // Reserved for future battery divider; not sampled in this build
 #define PETBOT_BATTERY_DIVIDER 2.0f
-#define PETBOT_BUTTON_PIN 0  // BOOT button on most T3 V1.6.1 boards, active low
+#define PETBOT_BUTTON_PIN 26 // External button: GPIO26 to GND, INPUT_PULLUP
 #define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
 bool touchEnabled = false;
 int touchBaseline = 0;
@@ -79,7 +78,7 @@ unsigned long moodChangedAt = 0;
 bool displayReady = false;
 unsigned long lastSoundSample = 0;
 unsigned long lastInteractionAt = 0;
-bool irEnabled = true; // IR obstacle sensor enabled by default
+bool irEnabled = false; // Enable after the IR module is connected
 unsigned long lastSoundEvent = 0;
 unsigned long nextIdleSoundAt = 0;
 unsigned long lastMoodSoundAt = 0;
@@ -1240,7 +1239,7 @@ void handleSerialProvisioning() {
 
 // ---------------------------------------------------------------------------
 // Physical interaction with no extra parts:
-//  * BOOT button (GPIO0, active low): 1 click = pet, 2 clicks = play,
+//  * BOOT button (GPIO26, active low): 1 click = pet, 2 clicks = play,
 //    3+ clicks = poke (he gets annoyed), long press (1.5 s) = sleep / wake.
 //  * Optional touch pad: a bare wire or foil on PETBOT_TOUCH_PIN (ESP32
 //    capacitive touch, no module needed). Off by default; enable with TOUCH:ON.
@@ -1410,7 +1409,8 @@ class FirmwareUpdateStream : public Stream {
 };
 
 // Internet OTA: manifest format is two lines: version, then MD5 checksum.
-void checkForFirmwareUpdate() {
+void checkForFirmwareUpdate() { return; /* OTA temporarily disabled until DevKit TLS bundle is configured. */
+#if 0
   const unsigned long now = millis();
   if (otaInProgress || WiFi.status() != WL_CONNECTED) return;
   if (lastOtaCheck && now - lastOtaCheck < 6UL * 60UL * 60UL * 1000UL) return;
@@ -1491,6 +1491,9 @@ void checkForFirmwareUpdate() {
   ESP.restart();
 }
 
+#endif
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PETBOT_PIEZO_PIN, OUTPUT);
@@ -1499,15 +1502,13 @@ void setup() {
   pinMode(PETBOT_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PETBOT_BUTTON_PIN), onButtonEdge, CHANGE);
   analogReadResolution(12);
-  analogSetPinAttenuation(PETBOT_BATTERY_PIN, ADC_11db);
-  pinMode(PETBOT_BATTERY_PIN, INPUT);
 
   petbotPrefs.begin("petbot", false);
   deviceToken = petbotPrefs.getString("device_token", "");
   petName = petbotPrefs.getString("pet_name", "Jupiter");
   petbotPrefs.putString("pet_name", "Jupiter");
   soundEnabled = petbotPrefs.getBool("sound", true);
-  irEnabled = petbotPrefs.getBool("ir_enabled", true);
+  irEnabled = petbotPrefs.getBool("ir_enabled", false);
   interactionCount = petbotPrefs.getUInt("interactions", 0);
   petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
   petEnergy = constrain(petbotPrefs.getInt("energy", 88), 0, 100);
@@ -1528,7 +1529,7 @@ void setup() {
       (deviceToken.length() >= 32 ? "YES" : "NO")
   );
   Serial.println(String("IR sensor GPIO34: ") + (irEnabled ? "ENABLED" : "DISABLED") + " | sound: " + (soundEnabled ? "ON" : "OFF"));
-  Serial.println("IMPORTANT: IR TX must be a 0-3.3V logic output before connection to GPIO34.");
+  Serial.println("IMPORTANT: IR OUT must be 0-3.3V before connection to GPIO34.");
   printPetbotHelp();
 
   Wire.begin(OLED_SDA, OLED_SCL);
@@ -1817,7 +1818,6 @@ void loop() {
     drawFace();
   }
   updatePetNeeds();
-  updateBattery();
   updateAutonomousMood();
   updateMicroAction();
   updatePhysicalInput();
