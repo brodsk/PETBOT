@@ -23,7 +23,7 @@ Install these Arduino libraries if they are not already installed:
 | IR obstacle sensor OUT/TX | GPIO34 |
 | External button, other side to GND | GPIO26 |
 
-GPIO34 is input-only. The IR sensor output must never exceed 3.3 V. Power the sensor from 3V3 initially if its module supports it. Do not connect 5 V to any ESP32 GPIO.
+GPIO34 is input-only. The IR sensor output must never exceed 3.3 V. Power the sensor from 3V3 initially if its module supports it. Do not connect 5 V to any ESP32 GPIO. The IR input is disabled by default; after connecting it, send `IR:ON` in Serial Monitor.
 
 The battery monitor is intentionally not sampled in this first DevKit build. GPIO35 is reserved for a future light-sensor analog input / later battery-divider redesign. PIR, DHT11, motors and motor drivers are not enabled yet.
 
