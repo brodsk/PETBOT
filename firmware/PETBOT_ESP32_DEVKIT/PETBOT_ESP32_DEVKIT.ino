@@ -78,7 +78,7 @@ unsigned long moodChangedAt = 0;
 bool displayReady = false;
 unsigned long lastSoundSample = 0;
 unsigned long lastInteractionAt = 0;
-bool irEnabled = true; // IR obstacle sensor enabled by default
+bool irEnabled = false; // Enable after the IR module is connected
 unsigned long lastSoundEvent = 0;
 unsigned long nextIdleSoundAt = 0;
 unsigned long lastMoodSoundAt = 0;
@@ -1508,7 +1508,7 @@ void setup() {
   petName = petbotPrefs.getString("pet_name", "Jupiter");
   petbotPrefs.putString("pet_name", "Jupiter");
   soundEnabled = petbotPrefs.getBool("sound", true);
-  irEnabled = petbotPrefs.getBool("ir_enabled", true);
+  irEnabled = petbotPrefs.getBool("ir_enabled", false);
   interactionCount = petbotPrefs.getUInt("interactions", 0);
   petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
   petEnergy = constrain(petbotPrefs.getInt("energy", 88), 0, 100);
