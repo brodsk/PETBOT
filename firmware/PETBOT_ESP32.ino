@@ -103,10 +103,10 @@ void sampleDht11(bool force = false) {
   if (dhtAvailable) {
     dhtTemperatureC = temperature;
     dhtHumidity = humidity;
-    Serial.printf("DHT11 GPIO%d: %.1f C, %.1f %% RH\\n",
+    Serial.printf("DHT11 GPIO%d: %.1f C, %.1f %% RH\n",
                   PETBOT_DHT11_PIN, dhtTemperatureC, dhtHumidity);
   } else {
-    Serial.printf("DHT11 GPIO%d: no response / checksum error\\n", PETBOT_DHT11_PIN);
+    Serial.printf("DHT11 GPIO%d: no response / checksum error\n", PETBOT_DHT11_PIN);
   }
 }
 
@@ -509,7 +509,7 @@ void sampleIRSensor() {
     irCandidateLevel = level;
     irCandidateSince = now;
     irInitialized = true;
-    Serial.printf("IR sensor ready: GPIO%d initial level=%d (active=%d)\\n", PETBOT_IR_PIN, level, PETBOT_IR_ACTIVE_LEVEL);
+    Serial.printf("IR sensor ready: GPIO%d initial level=%d (active=%d)\n", PETBOT_IR_PIN, level, PETBOT_IR_ACTIVE_LEVEL);
     return;
   }
 
@@ -522,7 +522,7 @@ void sampleIRSensor() {
   // Ignore short TX glitches; a real obstacle state must remain stable for 35 ms.
   if (level == irStableLevel || now - irCandidateSince < 35UL) return;
   irStableLevel = level;
-  Serial.printf("IR sensor GPIO%d stable level=%d\\n", PETBOT_IR_PIN, level);
+  Serial.printf("IR sensor GPIO%d stable level=%d\n", PETBOT_IR_PIN, level);
 
   // Trigger only when the sensor reports its configured active obstacle level.
   if (level != PETBOT_IR_ACTIVE_LEVEL || now - irLastEventAt < 1000UL) return;
@@ -1292,7 +1292,7 @@ void handleSerialProvisioning() {
     petbotPrefs.end();
     Serial.println("IR obstacle sensor disabled.");
   } else if (line == "IR:READ") {
-    Serial.printf("IR GPIO34 level=%d; configured obstacle level=%d\\n", digitalRead(PETBOT_IR_PIN), PETBOT_IR_ACTIVE_LEVEL);
+    Serial.printf("IR GPIO34 level=%d; configured obstacle level=%d\n", digitalRead(PETBOT_IR_PIN), PETBOT_IR_ACTIVE_LEVEL);
   } else if (line.length()) {
     Serial.println("Unknown command. Type HELP.");
   }
@@ -1484,7 +1484,7 @@ void checkForFirmwareUpdate() {
   if (!http.begin(secure, OTA_MANIFEST_URL)) return;
   const int code = http.GET();
   if (code != HTTP_CODE_OK) {
-    Serial.printf("OTA: manifest HTTP/TLS error %d\\n", code);
+    Serial.printf("OTA: manifest HTTP/TLS error %d\n", code);
     http.end();
     return;
   }
@@ -1520,14 +1520,14 @@ void checkForFirmwareUpdate() {
   if (!binHttp.begin(binClient, OTA_FIRMWARE_URL)) { otaInProgress = false; return; }
   const int binCode = binHttp.GET();
   if (binCode != HTTP_CODE_OK) {
-    Serial.printf("OTA: download HTTP %d\\n", binCode);
+    Serial.printf("OTA: download HTTP %d\n", binCode);
     binHttp.end(); otaInProgress = false; return;
   }
   const int length = binHttp.getSize();
-  Serial.printf("OTA: download size header = %d bytes\\n", length);
+  Serial.printf("OTA: download size header = %d bytes\n", length);
   const size_t beginSize = length > 0 ? (size_t)length : UPDATE_SIZE_UNKNOWN;
   if (!Update.begin(beginSize)) {
-    Serial.printf("OTA: Update.begin failed, error=%u\\n", Update.getError());
+    Serial.printf("OTA: Update.begin failed, error=%u\n", Update.getError());
     binHttp.end(); otaInProgress = false; return;
   }
   if (!Update.setMD5(expectedMd5.c_str())) {
@@ -1542,7 +1542,7 @@ void checkForFirmwareUpdate() {
   const bool finished = written > 0 && lengthOk && Update.end(true);
   binHttp.end();
   if (!finished || !Update.isFinished()) {
-    Serial.printf("OTA: failed, wrote %d bytes (expected %d), update error=%u\\n",
+    Serial.printf("OTA: failed, wrote %d bytes (expected %d), update error=%u\n",
                   written, length, Update.getError());
     Update.abort(); otaInProgress = false; return;
   }
