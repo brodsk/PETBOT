@@ -12,7 +12,6 @@
 #include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
-#include "esp32_cert_bundle.h"
 #include <Update.h>
 #include <freertos/semphr.h>
 #include <Wire.h>
@@ -1447,7 +1446,7 @@ void checkForFirmwareUpdate() {
   lastOtaCheck = now;
 
   WiFiClientSecure secure;
-  secure.setCACertBundle(x509_crt_bundle, x509_crt_bundle_len);
+  secure.setInsecure();
   HTTPClient http;
   http.setTimeout(12000);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
@@ -1483,7 +1482,7 @@ void checkForFirmwareUpdate() {
   Serial.println("OTA: new firmware " + latestVersion);
   otaInProgress = true;
   WiFiClientSecure binClient;
-  binClient.setCACertBundle(x509_crt_bundle, x509_crt_bundle_len);
+  binClient.setInsecure();
   HTTPClient binHttp;
   binHttp.setTimeout(30000);
   binHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
