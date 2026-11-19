@@ -1551,7 +1551,6 @@ void checkForFirmwareUpdate() {
   ESP.restart();
 }
 
-}
 
 void setup() {
   Serial.begin(115200);
