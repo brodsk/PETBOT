@@ -1,6 +1,6 @@
 /*
-  PETBOT firmware v3.7.0-devkit
-  Board: ESP32 DevKit (classic ESP32)
+  PETBOT firmware v3.7.1-t3
+  Board: LILYGO T3 V1.6.1 (classic ESP32)
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
   Core behavior continues without Wi-Fi after a bounded provisioning attempt.
@@ -12,6 +12,7 @@
 #include <WiFiManager.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
+#include "esp32_cert_bundle.h"
 #include <Update.h>
 #include <freertos/semphr.h>
 #include <Wire.h>
@@ -22,7 +23,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.7.0-devkit";
+const char* FIRMWARE_VERSION = "petbot-3.7.1-t3";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -43,10 +44,71 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define PETBOT_BATTERY_PIN 35 // Reserved for future battery divider; not sampled in this build
 #define PETBOT_BATTERY_DIVIDER 2.0f
 #define PETBOT_BUTTON_PIN 26 // External button: GPIO26 to GND, INPUT_PULLUP
-#define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
+#define PETBOT_DHT11_PIN 4  // DHT11 data pin; GPIO4 is reserved for the sensor on this build
+#define PETBOT_TOUCH_PIN 4   // shared pin; capacitive touch is unavailable while DHT11 is connected
 bool touchEnabled = false;
 int touchBaseline = 0;
 void calibrateTouch();
+
+// DHT11 reader (GPIO4). No external library required.
+unsigned long lastDhtSampleAt = 0;
+float dhtTemperatureC = NAN;
+float dhtHumidity = NAN;
+bool dhtAvailable = false;
+
+static bool waitDhtLevel(uint8_t level, uint32_t timeoutUs) {
+  const uint32_t started = micros();
+  while (digitalRead(PETBOT_DHT11_PIN) != level) {
+    if ((uint32_t)(micros() - started) > timeoutUs) return false;
+  }
+  return true;
+}
+
+static bool readDht11(float &temperatureC, float &humidityPct) {
+  uint8_t data[5] = {0};
+
+  pinMode(PETBOT_DHT11_PIN, OUTPUT);
+  digitalWrite(PETBOT_DHT11_PIN, LOW);
+  delay(20);
+  digitalWrite(PETBOT_DHT11_PIN, HIGH);
+  delayMicroseconds(30);
+  pinMode(PETBOT_DHT11_PIN, INPUT_PULLUP);
+
+  if (!waitDhtLevel(LOW, 120)) return false;
+  if (!waitDhtLevel(HIGH, 120)) return false;
+  if (!waitDhtLevel(LOW, 120)) return false;
+
+  for (uint8_t bit = 0; bit < 40; bit++) {
+    if (!waitDhtLevel(HIGH, 120)) return false;
+    const uint32_t pulseStarted = micros();
+    if (!waitDhtLevel(LOW, 120)) return false;
+    const uint32_t highTime = micros() - pulseStarted;
+    data[bit / 8] <<= 1;
+    if (highTime > 40) data[bit / 8] |= 1;
+  }
+
+  if ((uint8_t)(data[0] + data[1] + data[2] + data[3]) != data[4]) return false;
+  humidityPct = data[0] + data[1] * 0.1f;
+  temperatureC = data[2] + data[3] * 0.1f;
+  return true;
+}
+
+void sampleDht11(bool force = false) {
+  const unsigned long now = millis();
+  if (!force && now - lastDhtSampleAt < 3000UL) return;
+  lastDhtSampleAt = now;
+
+  float temperature = 0.0f, humidity = 0.0f;
+  dhtAvailable = readDht11(temperature, humidity);
+  if (dhtAvailable) {
+    dhtTemperatureC = temperature;
+    dhtHumidity = humidity;
+    Serial.printf("DHT11 GPIO%d: %.1f C, %.1f %% RH\\n",
+                  PETBOT_DHT11_PIN, dhtTemperatureC, dhtHumidity);
+  } else {
+    Serial.printf("DHT11 GPIO%d: no response / checksum error\\n", PETBOT_DHT11_PIN);
+  }
+}
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -1190,12 +1252,11 @@ void handleSerialProvisioning() {
     requestVoice(m, false);
     Serial.println("Voice test: " + m);
   } else if (line == "TOUCH:ON") {
-    touchEnabled = true;
-    calibrateTouch();
+    touchEnabled = false;
     petbotPrefs.begin("petbot", false);
-    petbotPrefs.putBool("touch_en", touchEnabled);
+    petbotPrefs.putBool("touch_en", false);
     petbotPrefs.end();
-    Serial.println(touchEnabled ? "Touch pad enabled." : "Touch pad NOT enabled.");
+    Serial.println("Touch pad unavailable: GPIO4 is assigned to DHT11.");
   } else if (line == "TOUCH:OFF") {
     touchEnabled = false;
     petbotPrefs.begin("petbot", false);
@@ -1409,8 +1470,7 @@ class FirmwareUpdateStream : public Stream {
 };
 
 // Internet OTA: manifest format is two lines: version, then MD5 checksum.
-void checkForFirmwareUpdate() { return; /* OTA temporarily disabled until DevKit TLS bundle is configured. */
-#if 0
+void checkForFirmwareUpdate() {
   const unsigned long now = millis();
   if (otaInProgress || WiFi.status() != WL_CONNECTED) return;
   if (lastOtaCheck && now - lastOtaCheck < 6UL * 60UL * 60UL * 1000UL) return;
@@ -1491,7 +1551,6 @@ void checkForFirmwareUpdate() { return; /* OTA temporarily disabled until DevKit
   ESP.restart();
 }
 
-#endif
 }
 
 void setup() {
@@ -1518,7 +1577,8 @@ void setup() {
   petSocialNeed = constrain(petbotPrefs.getInt("social_need", 32), 0, 100);
   petConfidence = constrain(petbotPrefs.getInt("confidence", 52), 0, 100);
   petbotPrefs.end();
-  if (touchEnabled) calibrateTouch();
+  touchEnabled = false; // GPIO4 is reserved for the connected DHT11 module.
+  pinMode(PETBOT_DHT11_PIN, INPUT_PULLUP);
 
   Serial.println(String("Hello! My name is ") + petName);
   Serial.println(
@@ -1530,6 +1590,7 @@ void setup() {
   );
   Serial.println(String("IR sensor GPIO34: ") + (irEnabled ? "ENABLED" : "DISABLED") + " | sound: " + (soundEnabled ? "ON" : "OFF"));
   Serial.println("IMPORTANT: IR OUT must be 0-3.3V before connection to GPIO34.");
+  Serial.println("DHT11 sensor: GPIO4 (DATA), 3V3 (VCC), GND.");
   printPetbotHelp();
 
   Wire.begin(OLED_SDA, OLED_SCL);
@@ -1813,6 +1874,7 @@ void loop() {
   }
   handleSerialProvisioning();
   checkForFirmwareUpdate();
+  sampleDht11();
   if (notificationMessage.length() && (long)(millis() - notificationUntil) >= 0) {
     notificationMessage = "";
     drawFace();
