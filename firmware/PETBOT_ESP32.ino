@@ -70,7 +70,7 @@ void sampleDht11(bool force = false) {
       reading.humidity < 0.0f || reading.humidity > 100.0f ||
       reading.temperature < -10.0f || reading.temperature > 60.0f) {
     dhtAvailable = false;
-    Serial.printf("DHT11 GPIO4: read failed (%s); check S/3V3/GND and wait 2 s between reads\\n",
+    Serial.printf("DHT11 GPIO4: read failed (%s); check S/3V3/GND and wait 2 s between reads\n",
                   dhtSensor.getStatusString());
     return;
   }
@@ -78,7 +78,7 @@ void sampleDht11(bool force = false) {
   dhtHumidity = reading.humidity;
   dhtTemperatureC = reading.temperature;
   dhtAvailable = true;
-  Serial.printf("DHT11 GPIO4: %.1f C, %.1f %% RH\\n",
+  Serial.printf("DHT11 GPIO4: %.1f C, %.1f %% RH\n",
                 dhtTemperatureC, dhtHumidity);
 }
 
@@ -485,7 +485,7 @@ void samplePIRSensor() {
     initialized = true;
     stableLevel = candidateLevel = level;
     candidateSince = now;
-    Serial.printf("PIR ready: GPIO36 (S_VP), initial level=%d; warming up for 30 s\\n", level);
+    Serial.printf("PIR ready: GPIO36 (S_VP), initial level=%d; warming up for 30 s\n", level);
     return;
   }
 
@@ -499,7 +499,7 @@ void samplePIRSensor() {
   const int previousLevel = stableLevel;
   stableLevel = level;
   if (now - lastLogAt > 1000UL) {
-    Serial.printf("PIR GPIO36 (S_VP): level=%d\\n", level);
+    Serial.printf("PIR GPIO36 (S_VP): level=%d\n", level);
     lastLogAt = now;
   }
 
