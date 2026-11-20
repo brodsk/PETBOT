@@ -17,12 +17,13 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <DHT.h>
 #include "petbot_face_bitmaps.h"
 #include "petbot_face_reference.h"
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.7.1-t3";
+const char* FIRMWARE_VERSION = "petbot-3.7.2-t3";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -49,64 +50,33 @@ bool touchEnabled = false;
 int touchBaseline = 0;
 void calibrateTouch();
 
-// DHT11 reader (GPIO4). No external library required.
+// DHT11 sensor on GPIO4. The Adafruit library handles ESP32 pulse timing.
+DHT dhtSensor(PETBOT_DHT11_PIN, DHT11);
 unsigned long lastDhtSampleAt = 0;
 float dhtTemperatureC = NAN;
 float dhtHumidity = NAN;
 bool dhtAvailable = false;
-
-static bool waitDhtLevel(uint8_t level, uint32_t timeoutUs) {
-  const uint32_t started = micros();
-  while (digitalRead(PETBOT_DHT11_PIN) != level) {
-    if ((uint32_t)(micros() - started) > timeoutUs) return false;
-  }
-  return true;
-}
-
-static bool readDht11(float &temperatureC, float &humidityPct) {
-  uint8_t data[5] = {0};
-
-  pinMode(PETBOT_DHT11_PIN, OUTPUT);
-  digitalWrite(PETBOT_DHT11_PIN, LOW);
-  delay(20);
-  digitalWrite(PETBOT_DHT11_PIN, HIGH);
-  delayMicroseconds(30);
-  pinMode(PETBOT_DHT11_PIN, INPUT_PULLUP);
-
-  if (!waitDhtLevel(LOW, 120)) return false;
-  if (!waitDhtLevel(HIGH, 120)) return false;
-  if (!waitDhtLevel(LOW, 120)) return false;
-
-  for (uint8_t bit = 0; bit < 40; bit++) {
-    if (!waitDhtLevel(HIGH, 120)) return false;
-    const uint32_t pulseStarted = micros();
-    if (!waitDhtLevel(LOW, 120)) return false;
-    const uint32_t highTime = micros() - pulseStarted;
-    data[bit / 8] <<= 1;
-    if (highTime > 40) data[bit / 8] |= 1;
-  }
-
-  if ((uint8_t)(data[0] + data[1] + data[2] + data[3]) != data[4]) return false;
-  humidityPct = data[0] + data[1] * 0.1f;
-  temperatureC = data[2] + data[3] * 0.1f;
-  return true;
-}
 
 void sampleDht11(bool force = false) {
   const unsigned long now = millis();
   if (!force && now - lastDhtSampleAt < 3000UL) return;
   lastDhtSampleAt = now;
 
-  float temperature = 0.0f, humidity = 0.0f;
-  dhtAvailable = readDht11(temperature, humidity);
-  if (dhtAvailable) {
-    dhtTemperatureC = temperature;
-    dhtHumidity = humidity;
-    Serial.printf("DHT11 GPIO%d: %.1f C, %.1f %% RH\n",
-                  PETBOT_DHT11_PIN, dhtTemperatureC, dhtHumidity);
-  } else {
-    Serial.printf("DHT11 GPIO%d: no response / checksum error\n", PETBOT_DHT11_PIN);
+  const float humidity = dhtSensor.readHumidity();
+  const float temperature = dhtSensor.readTemperature();
+  if (isnan(humidity) || isnan(temperature) ||
+      humidity < 0.0f || humidity > 100.0f ||
+      temperature < 0.0f || temperature > 80.0f) {
+    dhtAvailable = false;
+    Serial.println("DHT11 GPIO4: read failed; check S/3V3/GND");
+    return;
   }
+
+  dhtHumidity = humidity;
+  dhtTemperatureC = temperature;
+  dhtAvailable = true;
+  Serial.printf("DHT11 GPIO4: %.1f C, %.1f %% RH\\n",
+                dhtTemperatureC, dhtHumidity);
 }
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -1546,7 +1516,7 @@ void setup() {
   petConfidence = constrain(petbotPrefs.getInt("confidence", 52), 0, 100);
   petbotPrefs.end();
   touchEnabled = false; // GPIO4 is reserved for the connected DHT11 module.
-  pinMode(PETBOT_DHT11_PIN, INPUT_PULLUP);
+  dhtSensor.begin();
 
   Serial.println(String("Hello! My name is ") + petName);
   Serial.println(
