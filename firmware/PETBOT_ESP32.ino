@@ -452,6 +452,55 @@ void updateSoundPersonality() {
   }
 }
 
+// Sensor events should feel like reactions from a character, not identical alarms.
+// The same event can produce different moods depending on Jupiter's current needs.
+unsigned long lastSensorReactionAt = 0;
+
+String chooseSensorMood(bool obstacle) {
+  const uint32_t roll = esp_random() % 100;
+  if (petEnergy < 18) return obstacle ? "ANNOYED" : "SLEEPY";
+  if (petConfidence < 25 && petStimulation > 45) {
+    return obstacle ? (roll < 60 ? "SCARED" : "SUSPICIOUS") : "SHY";
+  }
+  if (obstacle) {
+    if (roll < 24) return "CONFUSED";
+    if (roll < 48) return "SUSPICIOUS";
+    if (roll < 68) return "ANNOYED";
+    if (roll < 86) return "CURIOUS";
+    return "SCARED";
+  }
+  if (petAttachment >= 55 && petMoodValue >= 55 && roll < 28) return "LOVE";
+  if (petAttachment < 25 && roll < 22) return "SHY";
+  if (petStimulation > 65 && roll < 38) return "EXCITED";
+  if (roll < 22) return "SURPRISED";
+  if (roll < 44) return "CURIOUS";
+  if (roll < 63) return "HAPPY";
+  if (roll < 82) return "PLAYFUL";
+  return "CONFUSED";
+}
+
+void applySensorReaction(bool obstacle) {
+  const unsigned long now = millis();
+  String reaction = chooseSensorMood(obstacle);
+  // Avoid stacking sensor events into an endless stream of startled expressions.
+  if (now - lastSensorReactionAt < 1200UL && reaction == mood) {
+    reaction = obstacle ? "CURIOUS" : "HAPPY";
+  }
+  lastSensorReactionAt = now;
+  mood = reaction;
+  moodOverrideUntil = now + (obstacle ? 1800UL : 2600UL) + (esp_random() % 1400UL);
+  nextAutonomousMoodAt = moodOverrideUntil + 900UL;
+  eyesOpen = true;
+
+  const int side = (esp_random() & 1) ? 1 : -1;
+  gazeTargetX = obstacle ? side * 7.0f : side * (3.0f + (esp_random() % 5));
+  gazeTargetY = obstacle ? 1.5f : -2.0f;
+  microAction = obstacle ? "OBSTACLE" : ((reaction == "LOVE" || reaction == "HAPPY") ? "EXCITED" : "WIDE_EYES");
+  microActionUntil = now + 650UL + (esp_random() % 700UL);
+  drawFace();
+  playRobotSound(reaction);
+}
+
 void samplePIRSensor() {
   static bool initialized = false;
   static int stableLevel = LOW;
@@ -489,16 +538,8 @@ void samplePIRSensor() {
 
   lastEventAt = now;
   registerPetInteraction(false);
-  mood = "SURPRISED";
-  moodOverrideUntil = now + 2200UL;
-  nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
-  gazeTargetX = (esp_random() & 1) ? -5.0f : 5.0f;
-  gazeTargetY = -1.0f;
-  microAction = "WIDE_EYES";
-  microActionUntil = now + 700UL;
-  drawFace();
-  playRobotSound("SURPRISED");
-  Serial.println("PETBOT PIR: motion detected");
+  applySensorReaction(false);
+  Serial.printf("PETBOT PIR: motion detected; mood=%s\n", mood.c_str());
 }
 
 void sampleIRSensor() {
@@ -531,16 +572,8 @@ void sampleIRSensor() {
   irLastEventAt = now;
   lastSoundEvent = now;
   registerPetInteraction(false);
-  mood = "SURPRISED";
-  moodOverrideUntil = now + 2200UL;
-  nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
-  gazeTargetX = (esp_random() & 1) ? -4.0f : 4.0f;
-  gazeTargetY = -1.0f;
-  microAction = "OBSTACLE";
-  microActionUntil = now + 900UL;
-  drawFace();
-  playRobotSound("SURPRISED");
-  Serial.println("PETBOT IR: obstacle detected");
+  applySensorReaction(true);
+  Serial.printf("PETBOT IR: obstacle detected; mood=%s\n", mood.c_str());
 }
 
 String jsonStringField(const String& json, const String& key) {
@@ -1537,8 +1570,12 @@ void sampleDht11(bool force = false) {
       reading.humidity < 0.0f || reading.humidity > 100.0f ||
       reading.temperature < -10.0f || reading.temperature > 60.0f) {
     dhtAvailable = false;
-    Serial.printf("DHT11 GPIO4: read failed (%s); check S/3V3/GND and wait 2 s between reads\n",
-                  dhtSensor.getStatusString());
+    static unsigned long lastDhtErrorLogAt = 0;
+    if (lastDhtErrorLogAt == 0 || now - lastDhtErrorLogAt >= 30000UL) {
+      Serial.printf("DHT11 GPIO4: read failed (%s). Check DATA/3V3/GND; retrying.\n",
+                    dhtSensor.getStatusString());
+      lastDhtErrorLogAt = now;
+    }
     return;
   }
 
