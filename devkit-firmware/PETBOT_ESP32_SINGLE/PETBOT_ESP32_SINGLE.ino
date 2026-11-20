@@ -1,0 +1,1933 @@
+/*
+  PETBOT firmware v3.7.0-devkit
+  Board: ESP32 DevKit (classic ESP32)
+  Features: local Vector-inspired behavior model, seven internal drives,
+  OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
+  Core behavior continues without Wi-Fi after a bounded provisioning attempt.
+  GPIO34 analog sound input is disabled by default. Motors and camera are not present.
+*/
+
+#include <WiFi.h>
+#include <Preferences.h>
+#include <WiFiManager.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <Update.h>
+#include <freertos/semphr.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// === Embedded face assets (single-file Arduino sketch) ===
+// Exact 88x64 face bitmaps from the user-supplied sketch, RLE/base64 packed.
+static const char PETBOT_FACE_OPEN_RLE[] PROGMEM =
+"fAABfwHwAQABDwH+BQABAQL/AQABfwH/AYAEAAEHAv8BgQL/AeAEAAEPAv8BwwL/AfAEAAEfAv8B5wL/AfgEAAEfAv8B5wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B9wL/AfgEAAEfAv8B5wL/AfgEAAEfAv8B5wL/AfgEAAEPAv8B5wL/AfgEAAEHAv8BwQL/AfAEAAEDAv8BAAL/AeAEAAEBAf8B/gEAAT8B/wGABQABfwH8AQABHwH//wAtAA==";
+static const char PETBOT_FACE_GLANCE_RLE[] PROGMEM =
+"agABAwH/AfgIAAEHAf8B/AgAAQ8B/wH8CAABHwH/Af4IAAE/Av8FAAEHAf8B8AE/Av8BgAQAAT8B/wH4AT8C/wGABAAC/wH+AT8C/wGAAwABAQP/AT8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/Ab8C/wGAAwABAQP/AT8C/wGAAwABAQP/AT8C/wUAAv8B/gE/Av8FAAF/Af8B/AEfAf8B/ggAAQ8B/wH8CAABAwH/Afj/ADYA";
+
+
+// 18 monochrome expressions digitized from the user's reference sheet.
+// Each expression is 56x24 RLE; rendered 2x on the 128x64 OLED.
+static const char faceRleB64[] PROGMEM =
+"////AgE1Av8BBDIE/wQEMAT/BgUtBP8JBCsEMwT/CwUpC/8DDykF/wsGKwb/CAYWAR0BIwEvBf8EBhYBHQEjAjIE/wMDFgEdASMCNQH/FwEbBCMB/xcFHgIiAv8YAh8E/xgBIAH/GAEgAf8GARkBHwL/Ggb/////////LwX/CAYsCf8GBQwDKgM0Av8EAw4CKQIvAjUC/wIDCAMPAigCLQU1Av8CAQYGDwInAiwCMQE1Av8BAgUCCwEPAicCKwIwAjUC/wEBBQIKAg8BJwIrAjABNAL/AQEFAg4CJwIsAjID/wECBgIMAygBLAf/AgEGBygCLgIzAf8CAg0BKQIxA/8DAgsDKgn/BAgTAhoBHwIjASUBLQL/EgEVARkBGwEeASEC/xEBFQIYARwC/xEBFgP/EAH//////////wUFLgX/AwktCP8CBAkDLAMyBP8CAgoDKwM0Av8BAwUECwIrAi8ENAP/AQIFBQsDKgMuBTUC/wECBQULAyoDLgU1Av8BAgUECwIaBSsCLwQ1Av8CAgYCCwIYBysDMAI0A/8CAwkEGAEeASsEMwP/AwkYAR4BLAn/BAYYAh4BLgb/GQEeAf8ZAR4B/xkF////////////BQUuBf8DCC0I/wIECQMsAzIE/wICCgMrAzQC/wEDCwIrAjQD/wECCwIrAjUC/wECCwMrAjUC/wEDCwIrAjUC/wICCwIrAjQD/wIDCgMVARwBIQIrAzMD/wMJFQEcASIBLAn/BAcWARsCIQItB/8WAhkCHAIhAf8XAh0E/xcBHgL/FwIeAf8YAR4B/xkF////////BwUwAf8ECS0H/wMLKgv/AgQMAykEMwP/AQQNAikBKwE0Av8BBA0CGAEkASkDNAP/AQIEAQ0CFAEYARwBIAEkASoCNAP/AQUNAhMCFwEbAiABIwEqAjQD/wEDBQINAhMBFgIbAR8BIwEqAzQD/wEEBgENAisDMwP/AgEEAwwDKwQyBP8DCywJ/wQGLgb/LgIyAv8ZCS4BMwH/FgYeBy4BMwH/LgEzAf8uAjIC/y8E/zAC//////8CAjQC/wIDMwP/AQEEAjICNgH/AQEFAjECNgH/AQEGAjACNgH/AQEIAS8BNgH/AQEJAi0CNgH/AQIKAiwCNQL/AgELAisCNQH/AwIMAh0BKgIzAv8EAw4BHAMiASkBMQP/BgcOAhcCGwIeAiECKAIsBv8KBxcFHwQnB/8XARoBIgH/BQEIARcBIgEsAS8B/wcBCwEXAiIBKwEvATIB/wcBCwEXAiIBKwEyAf8XAiIB/xgL////////LwX/CAYsCv8FBQ0CKgM1Af8DBA4CKQIvAjUC/wIDCAMPAigCLQU2Af8BAgYDCgIPAhUBGQEdASEBJQEnAiwCMQE2Af8BAgUCCgIPAhUBGAIdASEBJAEnAisCMAI1Av8BAQUCCgIPARQBGAEcASABJAEnAisCNAL/AQEFAg0DFwEcASMBJwIsAjID/wECBgILBCgBLQb/AgEGBigCMwL/AgINARYNKQMxA/8DAwsDFgErB/8ECBYB/xYBIwH/FwkiAf8iAf8iAf8iAf8gAv///////yQS/wUNJhH/AhAmEP8EECUP/wIQJRL/AQwmEP8DEP8DC/8DAf8WDf8WASIB/yIB/xYBIgH/FgohAv8fASEB/x8BIQH/HwEhAf8gAv////////8kEv8GDCYR/wIQJhH/BBAlDv8CECUS/wENJhD/AhH/Awz/AwL///8WDf8WAiIB/xcBIgH/FwIhAf8YASAC/xkCHgP/GgX///////////8CESUS/wECBwYSAiQCKwY1Av8BAgcGEgEkAisGNQL/AgIHBhECJQIqBzUB/wMCBwYQAiYDKgczAv8EDSgM/wgGGQYrB/8ZAR4BKwEvAf8ZAR4BKwEwAf8ZAR4BKwEwAf8ZAR4BKwIvAf8ZAR4BLAT/GQIdAi0C/xoE/////////////wMDMwL/AgUyBP8CBTEG/wIGFAEaASABMQb/AgUUARoBIAExBv8DAxQBGgEgATIE/xUCGAUfAv8WAxwE/xYCHwH/BgEWAR8BMQH/FgEfAf8FARYBHwEzAf8FARYBHwH/FQIfAv8WCv////////////8EBi0H/wMJLAn/AgMJBCsDMwP/AgIKAxoBHQEgASMBKwI0Av8BAgsCFAEZASoDNAP/AQILAxMBFgEZARwBHwEiASQBKgM1Av8BAgsDKgI1Av8BAgsCKgM0A/8BAwsCKwI0Av8CAwkEKwMzA/8DCSwJ/wQGFQEcASIBLQf/FQEcASIB/xUBGwIiAf8WARsCIQL/FwQdBP//////////AgE1Av8BBDIF/wMFMAT/BgUuBP8JBCsE/wsFKQT/DgQpBf8LBiwF/wgGLwX/BAYyBf8DA///Fwz/BwEYASEC/xgCIQH/BAEZASEBMgH/BgEZAiAC/xoH////////////AQ8lEv//////BgH/LgH/CAEuAf8IARUM/xUBIAH/FgEfAf8XCP///////////////wMB/wETJRL/AQIIBRICJAIrBjYB/wIBBwcSASUCKwY1Av8CAwcHEQImAisGNAL/BAoPAycKMgP/BgoWARwBIgEpCv8WARwBIgH/FwEbAyIB/xgDHQIgAv8YAR4D/xgBHwH/GAIeAv8ZBv///////////ywE/wEDKQr/AgQnBC8F/wUEJgMuB/8HBSUCLQn/CgQtCv8MBSwL/w0ELAv/CQYsC/8FBi0J/wMEGQgtCf8YBh8CLgf/GQEgATAD/xkBHwL/GQEfAv8ZAh8C/xoBHwL/GgIdA/8bBP////8EDiYO/wgBDQEpAi8C/wgBDQH/CAENASoB/wgBDQEqAf8IAQ0BKgH/CAENASoB/wgBDQEVARsBIAEqAf8IAQ0BFgEaAiABKgH/CAENARYBGgIfASoB/w0BFwMcA////////////////wsCKgf/CAcoAzAC/////wQJLQf/AwsqC/8CBAwCKQQzA/8BBA0CKQErATQC/wEEDQIkASkDNAP/AQIEAQ0CFAEYARwBIAEkASoCNAP/AQIEAg0CEwEXARsBHwIjASoCNAP/AQMFAQ0CEwEWAhsBHwEiAioDNAP/AQQGAQ0CFgEqBDMD/wIBBAIMAysEMgT/AgwsCf8EByEBLQf/Fg3/FgEiAf8WASIB/xYBIgL/Fg3//////w==";
+static const uint16_t faceRleOffsets[18] PROGMEM = {0,120,312,462,610,792,976,1186,1268,1344,1476,1588,1746,1840,1890,2006,2114,2230};
+static uint8_t faceRleDecoded[2398];
+static bool faceRleReady = false;
+
+static int8_t faceB64Value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+static void decodeFaceRle() {
+  if (faceRleReady) return;
+  uint32_t out = 0;
+  uint32_t acc = 0;
+  uint8_t bits = 0;
+  for (uint16_t i = 0; ; ++i) {
+    char c = (char)pgm_read_byte(faceRleB64 + i);
+    if (!c || c == '=') break;
+    int8_t v = faceB64Value(c);
+    if (v < 0) continue;
+    acc = (acc << 6) | (uint8_t)v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (out < sizeof(faceRleDecoded)) faceRleDecoded[out++] = (uint8_t)(acc >> bits);
+    }
+  }
+  faceRleReady = (out == sizeof(faceRleDecoded));
+}
+static void drawFaceExpression(Adafruit_GFX& gfx, uint8_t index, int16_t x, int16_t y) {
+  decodeFaceRle();
+  if (!faceRleReady) return;
+  uint16_t p = pgm_read_word(faceRleOffsets + (index % 18));
+  for (uint8_t row = 0; row < 24; ++row) {
+    while (true) {
+      uint8_t start = faceRleDecoded[p++];
+      if (start == 255) break;
+      uint8_t len = faceRleDecoded[p++];
+      gfx.fillRect(x + start * 2, y + row * 2, len * 2, 2, 1);
+    }
+  }
+}
+
+// === End embedded face assets ===
+
+Preferences petbotPrefs;
+String deviceToken;
+const char* FIRMWARE_VERSION = "petbot-3.7.0-devkit";
+const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
+const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
+unsigned long lastOtaCheck = 0;
+bool otaInProgress = false;
+const char* CLOUD_BASE = "https://petbotpet.vercel.app";
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define OLED_ADDRESS 0x3C
+#define OLED_SDA 21
+#define OLED_SCL 22
+
+// Optional hardware: passive piezo on GPIO25; IR obstacle sensor TX on GPIO34.
+#define PETBOT_PIEZO_PIN 25
+#define PETBOT_IR_PIN 34
+#define PETBOT_IR_ACTIVE_LEVEL LOW  // Common active-low obstacle sensor output; verify during testing.
+#define PETBOT_BATTERY_PIN 35 // Reserved for future battery divider; not sampled in this build
+#define PETBOT_BATTERY_DIVIDER 2.0f
+#define PETBOT_BUTTON_PIN 26 // External button: GPIO26 to GND, INPUT_PULLUP
+#define PETBOT_TOUCH_PIN 4   // optional bare-wire capacitive touch pad (touch channel T0)
+bool touchEnabled = false;
+int touchBaseline = 0;
+void calibrateTouch();
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+String mood = "CURIOUS";
+String lastCloudMood = "";
+unsigned long moodOverrideUntil = 0;
+unsigned long lastActivity = 0;
+unsigned long wifiLostAt = 0;
+bool wifiWasConnected = false;
+unsigned long lastPoll = 0;
+unsigned long lastHeartbeat = 0;
+unsigned long lastBlink = 0;
+unsigned long nextBlinkAt = 0;
+unsigned long nextAutonomousMoodAt = 0;
+unsigned long nextMicroActionAt = 0;
+unsigned long microActionUntil = 0;
+String microAction = "";
+String notificationMessage = "";
+unsigned long notificationUntil = 0;
+float gazeX = 0.0f;
+float gazeY = 0.0f;
+float gazeTargetX = 0.0f;
+float gazeTargetY = 0.0f;
+bool eyesOpen = true;
+bool blinking = false;             // non-blocking blink state (see loop)
+unsigned long blinkUntil = 0;
+String lastDrawnMood = "";         // detects emotion changes for the onset "pop"
+unsigned long moodChangedAt = 0;
+bool displayReady = false;
+unsigned long lastSoundSample = 0;
+unsigned long lastInteractionAt = 0;
+bool irEnabled = false; // Enable after the IR module is connected
+unsigned long lastSoundEvent = 0;
+unsigned long nextIdleSoundAt = 0;
+unsigned long lastMoodSoundAt = 0;
+int irStableLevel = HIGH;
+int irCandidateLevel = HIGH;
+unsigned long irCandidateSince = 0;
+unsigned long irLastEventAt = 0;
+bool irInitialized = false;
+bool soundEnabled = true;
+volatile bool voiceActive = false;
+volatile uint32_t lastVoiceEndedAt = 0;
+uint32_t interactionCount = 0;
+
+// Jupiter identity and battery monitor.
+String petName = "Jupiter";
+float batteryVoltage = 0.0f;
+int batteryPercent = -1;
+bool batteryCharging = false;
+bool batteryLowAlerted = false;
+unsigned long lastBatteryRead = 0;
+unsigned long batteryTrendAt = 0;
+float batteryTrendStart = 0.0f;
+unsigned long batteryMoodUntil = 0;
+
+// Local pet needs/personality model. Runs on the ESP32 even without cloud access.
+int petCuriosity = 58;       // rises during quiet time; positive interaction settles it
+int petEnergy = 88;          // falls while awake and recovers while sleeping
+int petMoodValue = 68;       // general affect, separate from the displayed mood label
+int petAttachment = 12;      // grows gradually through positive interactions
+int petStimulation = 24;     // short-lived arousal/alertness from events
+int petSocialNeed = 32;      // rises slowly during isolation; contact relieves it
+int petConfidence = 52;      // rises with successful interactions, falls after setbacks
+unsigned long lastNeedsUpdate = 0;
+unsigned long lastNeedsSave = 0;
+
+void savePetNeeds() {
+  petbotPrefs.begin("petbot", false);
+  petbotPrefs.putInt("curiosity", petCuriosity);
+  petbotPrefs.putInt("energy", petEnergy);
+  petbotPrefs.putInt("mood_value", petMoodValue);
+  petbotPrefs.putInt("attachment", petAttachment);
+  petbotPrefs.putInt("stimulation", petStimulation);
+  petbotPrefs.putInt("social_need", petSocialNeed);
+  petbotPrefs.putInt("confidence", petConfidence);
+  petbotPrefs.end();
+  lastNeedsSave = millis();
+}
+
+void updatePetNeeds() {
+  const unsigned long now = millis();
+  if (lastNeedsUpdate == 0) {
+    lastNeedsUpdate = now;
+    return;
+  }
+  const unsigned long elapsed = now - lastNeedsUpdate;
+  if (elapsed < 60000UL) return;
+  const int minutes = (int)min((unsigned long)6, elapsed / 60000UL);
+  lastNeedsUpdate = now;
+
+  const bool sleeping = mood == "SLEEPY" || petEnergy < 14;
+  petStimulation = max(0, petStimulation - minutes * (sleeping ? 8 : 5));
+  if (sleeping) {
+    petEnergy = min(100, petEnergy + minutes * 5);
+    petCuriosity = max(8, petCuriosity - minutes * 2);
+    petMoodValue = min(100, petMoodValue + minutes);
+    petSocialNeed = min(100, petSocialNeed + minutes);
+  } else {
+    petEnergy = max(0, petEnergy - minutes);
+    if (now - lastActivity > 12000UL) {
+      petCuriosity = min(100, petCuriosity + minutes * 2);
+      petSocialNeed = min(100, petSocialNeed + minutes);
+    }
+    if (now - lastActivity > 90000UL) {
+      const int moodDecay = petAttachment >= 60 ? 0 : (petAttachment >= 30 ? max(0, minutes - 1) : minutes);
+      petMoodValue = max(20, petMoodValue - moodDecay);
+    }
+  }
+  if (now - lastNeedsSave > 60000UL) savePetNeeds();
+}
+
+void registerPetInteraction(bool affectionate) {
+  const unsigned long now = millis();
+  lastActivity = now;
+  lastInteractionAt = now;
+  interactionCount++;
+  petEnergy = min(100, petEnergy + 8);
+  petMoodValue = min(100, petMoodValue + (affectionate ? 12 : 6));
+  petCuriosity = max(10, petCuriosity - 12);
+  petStimulation = min(100, petStimulation + (affectionate ? 18 : 12));
+  petSocialNeed = max(0, petSocialNeed - (affectionate ? 22 : 10));
+  petConfidence = min(100, petConfidence + (affectionate ? 2 : 1));
+  if (affectionate) petAttachment = min(100, petAttachment + (petAttachment < 60 ? 3 : 1));
+  if (now - lastNeedsSave > 60000UL) savePetNeeds();
+  petbotPrefs.begin("petbot", false);
+  petbotPrefs.putUInt("interactions", interactionCount);
+  petbotPrefs.end();
+}
+// ---------------------------------------------------------------------------
+// PETBOT voice: Vector-style non-verbal vocalizations on a passive piezo.
+// The phrase engine now builds more expressive robot syllables, not only pure
+// tone glides. This makes idle sounds and reactions feel more like a living
+// companion instead of a simple buzzer.
+// ---------------------------------------------------------------------------
+enum VoiceMod : uint8_t { VM_GLIDE, VM_VIBRATO, VM_PURR, VM_TRILL, VM_REST, VM_BURBLE, VM_CHIRP };
+struct VoiceSeg { uint16_t f0; uint16_t f1; uint16_t ms; uint8_t mod; };
+#define VOICE_MAX_SEGS 12
+// Request byte: low 7 bits = mood code (1..8), bit 7 = low-priority idle murmur.
+volatile uint8_t voiceRequest = 0;
+VoiceSeg voiceSegs[VOICE_MAX_SEGS];  // touched only by the voice task
+uint8_t voiceLen = 0;
+
+uint8_t voiceCodeForMood(const String& m) {
+  if (m == "HAPPY") return 1;
+  if (m == "CURIOUS") return 2;
+  if (m == "SURPRISED") return 3;
+  if (m == "LOVE") return 4;
+  if (m == "ANNOYED") return 5;
+  if (m == "SLEEPY") return 6;
+  if (m == "SAD") return 7;
+  if (m == "EXCITED") return 9;
+  if (m == "SHY") return 10;
+  if (m == "CONFUSED") return 11;
+  if (m == "BORED") return 12;
+  if (m == "SCARED") return 13;
+  if (m == "PLAYFUL") return 14;
+  if (m == "DIZZY") return 15;
+  if (m == "SUSPICIOUS") return 16;
+  if (m == "FRUSTRATED") return 17;
+  if (m == "ECSTATIC") return 18;
+  return 8;
+}
+
+// base +/- pct percent
+static uint16_t vj(uint16_t base, uint8_t pct) {
+  const int d = (int)base * pct / 100;
+  return (uint16_t)((int)base + (int)(esp_random() % (2 * d + 1)) - d);
+}
+
+static void vAdd(uint16_t f0, uint16_t f1, uint16_t ms, uint8_t mod) {
+  if (voiceLen >= VOICE_MAX_SEGS) return;
+  float tempo = 1.0f, pitch = 1.0f;
+  if (petEnergy < 25) { tempo = 1.35f; pitch = 0.88f; }
+  else if (petStimulation > 65) { tempo = 0.85f; pitch = 1.08f; }
+  if (mod != VM_REST) {
+    f0 = (uint16_t)max(300.0f, min(4200.0f, f0 * pitch));
+    f1 = (uint16_t)max(300.0f, min(4200.0f, f1 * pitch));
+  }
+  voiceSegs[voiceLen++] = {f0, f1, (uint16_t)(ms * tempo), mod};
+}
+static void vRest(uint16_t ms) { vAdd(0, 0, ms, VM_REST); }
+
+static void buildVoice(uint8_t code, bool idle) {
+  voiceLen = 0;
+  const uint32_t r = esp_random() % 4;
+  switch (code) {
+    case 1:  // HAPPY: bright rising chirps, ends in a bird-like trill
+      if (idle) { vAdd(vj(1500, 10), vj(2100, 10), 70, VM_BURBLE); vRest(25); vAdd(vj(850, 15), vj(1200, 15), 80, VM_CHIRP); break; }
+      if (r == 0) { vAdd(1300, 2300, 90, VM_GLIDE); vRest(35); vAdd(1700, 2700, 80, VM_BURBLE); vAdd(2400, 2400, 130, VM_TRILL); }
+      else if (r == 1) { vAdd(1600, 2400, 70, VM_GLIDE); vAdd(2400, 1500, 110, VM_VIBRATO); vRest(30); vAdd(1500, 2500, 100, VM_CHIRP); }
+      else if (r == 2) { vAdd(1400, 2000, 60, VM_CHIRP); vRest(25); vAdd(1400, 2000, 60, VM_BURBLE); vRest(25); vAdd(1800, 2800, 120, VM_TRILL); }
+      else { vAdd(1200, 1900, 80, VM_CHIRP); vRest(25); vAdd(1700, 2600, 90, VM_GLIDE); vRest(20); vAdd(2200, 2200, 150, VM_TRILL); }
+      break;
+    case 2:  // CURIOUS: question-like upward glides and wobbles
+      if (idle) { vAdd(vj(1000, 15), vj(1500, 15), 90, VM_BURBLE); vRest(35); vAdd(vj(750, 10), vj(1200, 12), 60, VM_CHIRP); break; }
+      if (r == 0) { vAdd(900, 1500, 150, VM_GLIDE); vRest(60); vAdd(1500, 1700, 130, VM_VIBRATO); }
+      else if (r == 1) { vAdd(1200, 1000, 60, VM_BURBLE); vRest(40); vAdd(1000, 1800, 160, VM_GLIDE); vAdd(1800, 1800, 90, VM_TRILL); }
+      else if (r == 2) { vAdd(1100, 1700, 110, VM_VIBRATO); vRest(50); vAdd(1300, 1900, 90, VM_BURBLE); }
+      else { vAdd(800, 1600, 120, VM_CHIRP); vRest(35); vAdd(1600, 2200, 140, VM_GLIDE); }
+      break;
+    case 3:  // SURPRISED: quick squeak, then a wobbly fall
+      vAdd(1400, 2900, 60, VM_CHIRP);
+      vAdd(2900, 1800, 130, VM_VIBRATO);
+      if (r == 2) { vRest(40); vAdd(1500, 2200, 70, VM_GLIDE); }
+      else if (r == 3) { vAdd(2200, 1600, 120, VM_BURBLE); }
+      break;
+    case 4: {  // LOVE: a coo and a purr; the more attached, the longer it purrs
+      const uint16_t purrMs = (uint16_t)(450 + min(100, max(0, petAttachment)) * 5);
+      if (idle) { vAdd(1200, 1500, 150, VM_VIBRATO); vAdd(1100, 900, purrMs / 2, VM_PURR); vRest(25); vAdd(1500, 1800, 120, VM_BURBLE); break; }
+      vAdd(1100, 1700, 140, VM_GLIDE);
+      vAdd(1100, 900, purrMs, VM_PURR);
+      vAdd(1700, 1300, 200, VM_VIBRATO);
+      if (r == 2) vAdd(1300, 1600, 110, VM_BURBLE);
+      break;
+    }
+    case 5:  // ANNOYED: low grumble, then a disapproving drop
+      if (idle) { vAdd(600, 450, 180, VM_PURR); vRest(25); vAdd(520, 420, 120, VM_CHIRP); break; }
+      vAdd(700, 500, 260, VM_PURR);
+      vRest(50);
+      vAdd(520, 320, 140, VM_GLIDE);
+      if (r == 2) { vRest(40); vAdd(450, 450, 200, VM_PURR); }
+      else if (r == 3) { vRest(20); vAdd(370, 280, 130, VM_BURBLE); }
+      break;
+    case 6:  // SLEEPY: a yawn; when idle, a slow snore
+      if (idle) { vAdd(700, 520, 320, VM_PURR); vRest(90); vAdd(430, 360, 220, VM_BURBLE); break; }
+      vAdd(1200, 1500, 200, VM_VIBRATO);
+      vAdd(1500, 500, 520, VM_VIBRATO);
+      if (r == 3) vAdd(470, 330, 280, VM_PURR);
+      break;
+    case 7:  // SAD: slow descending whimper
+      vAdd(1300, 800, idle ? 260 : 420, VM_VIBRATO);
+      if (!idle) { vRest(90); vAdd(1000, 520, 380, VM_BURBLE); }
+      else { vRest(40); vAdd(600, 400, 240, VM_PURR); }
+      break;
+    case 9:  // EXCITED: fast rising triple chirp and a high trill
+      if (idle) { vAdd(1800, 2800, 60, VM_CHIRP); vRest(20); vAdd(2000, 3000, 60, VM_CHIRP); break; }
+      vAdd(1500, 2600, 55, VM_CHIRP); vRest(20);
+      vAdd(1800, 2900, 55, VM_CHIRP); vRest(20);
+      vAdd(2100, 3100, 70, VM_GLIDE);
+      vAdd(2800, 2800, r == 1 ? 260 : 170, VM_TRILL);
+      break;
+    case 10:  // SHY: soft hesitant coo, a pause, a smaller coo
+      if (idle) { vAdd(1100, 1300, 140, VM_VIBRATO); break; }
+      vAdd(1000, 1300, 120, VM_VIBRATO); vRest(130);
+      vAdd(1250, 1050, 170, VM_VIBRATO);
+      if (r == 2) { vRest(90); vAdd(1000, 1150, 100, VM_BURBLE); }
+      break;
+    case 11:  // CONFUSED: "hm? hmm?" wobbles that end on a rising question
+      if (idle) { vAdd(1000, 1400, 120, VM_VIBRATO); break; }
+      vAdd(900, 1100, 130, VM_VIBRATO); vRest(60);
+      vAdd(1200, 900, 100, VM_GLIDE); vRest(50);
+      vAdd(900, 1700, 190, VM_GLIDE);
+      break;
+    case 12:  // BORED: a long sigh
+      if (idle) { vAdd(900, 600, 300, VM_VIBRATO); break; }
+      vAdd(1300, 650, 700, VM_VIBRATO);
+      if (r == 3) { vRest(120); vAdd(700, 520, 260, VM_PURR); }
+      break;
+    case 13:  // SCARED: trembling squeal, a gulp of silence, a shaky whimper
+      if (idle) { vAdd(2300, 2800, 120, VM_TRILL); break; }
+      vAdd(2200, 3000, 70, VM_GLIDE);
+      vAdd(3000, 3000, 260, VM_TRILL); vRest(70);
+      vAdd(2400, 2000, 160, VM_TRILL);
+      break;
+    case 14: vAdd(1200, 2100, 90, VM_CHIRP); vRest(35); vAdd(1900, 1300, 90, VM_BURBLE); vRest(30); vAdd(1500, 2400, 110, VM_TRILL); break;
+    case 15: vAdd(1900, 900, 260, VM_VIBRATO); vRest(45); vAdd(1500, 700, 240, VM_BURBLE); break;
+    case 16: vAdd(650, 850, 150, VM_PURR); vRest(90); vAdd(800, 1200, 180, VM_GLIDE); break;
+    case 17: vAdd(520, 380, 130, VM_PURR); vRest(35); vAdd(560, 340, 190, VM_VIBRATO); break;
+    case 18: vAdd(1700, 2800, 70, VM_CHIRP); vRest(20); vAdd(2200, 3300, 75, VM_CHIRP); vAdd(3000, 3000, 220, VM_TRILL); break;
+    default:
+      vAdd(1200, 1200, 55, VM_BURBLE);
+      vAdd(1300, 1000, 80, VM_CHIRP);
+  }
+}
+
+// Returns true if the phrase was interrupted by a newer request.
+static bool playVoiceSegs(bool idle) {
+  unsigned int lastF = 0;
+  for (uint8_t i = 0; i < voiceLen; i++) {
+    const VoiceSeg s = voiceSegs[i];
+    const uint32_t t0 = millis();
+    uint32_t t;
+    if (s.mod == VM_REST) { noTone(PETBOT_PIEZO_PIN); lastF = 0; }
+    while ((t = millis() - t0) < s.ms) {
+      // Stop an in-progress phrase immediately when sleep starts.
+      if (mood == "SLEEPY") {
+        noTone(PETBOT_PIEZO_PIN);
+        return true;
+      }
+      if (!soundEnabled) { noTone(PETBOT_PIEZO_PIN); return true; }
+      const uint8_t req = voiceRequest;
+      if (req) {
+        // A real reaction interrupts anything; an idle murmur never interrupts a reaction.
+        if (idle || !(req & 0x80)) { noTone(PETBOT_PIEZO_PIN); return true; }
+        voiceRequest = 0;
+      }
+      if (s.mod != VM_REST) {
+        float f = (float)s.f0 + ((float)s.f1 - (float)s.f0) * ((float)t / (float)s.ms);
+        if (s.mod == VM_VIBRATO) f *= 1.0f + 0.045f * sinf((float)t * 0.0408f);  // ~6.5 Hz wobble
+        else if (s.mod == VM_PURR) f *= ((t / 18) & 1) ? 0.90f : 1.0f;            // ~28 Hz flutter = purr
+        else if (s.mod == VM_TRILL) f *= ((t / 32) & 1) ? 1.20f : 1.0f;           // ~15 Hz warble
+        else if (s.mod == VM_BURBLE) f *= 1.0f + 0.08f * sinf((float)t * 0.068f);
+        else if (s.mod == VM_CHIRP) f *= 1.0f + 0.16f * sinf((float)t * 0.095f);
+        const unsigned int fi = (unsigned int)f;
+        if (fi != lastF) { tone(PETBOT_PIEZO_PIN, fi); lastF = fi; }
+      }
+      delay(5);
+    }
+  }
+  noTone(PETBOT_PIEZO_PIN);
+  return false;
+}
+
+void voiceTask(void*) {
+  for (;;) {
+    const uint8_t req = voiceRequest;
+    if (!req) { delay(10); continue; }
+    voiceRequest = 0;
+    if (!soundEnabled) continue;
+    const bool idle = (req & 0x80) != 0;
+    buildVoice(req & 0x7F, idle);
+    voiceActive = true;
+    playVoiceSegs(idle);  // if interrupted, the newer request is picked up next loop
+    voiceActive = false;
+    lastVoiceEndedAt = millis();
+  }
+}
+
+void requestVoice(const String& m, bool idle) {
+  // Sleep is silent: do not queue snores, yawns, or delayed sounds.
+  if (mood == "SLEEPY" || m == "SLEEPY") {
+    voiceRequest = 0;
+    noTone(PETBOT_PIEZO_PIN);
+    return;
+  }
+  if (!soundEnabled) return;
+  const uint8_t code = voiceCodeForMood(m);
+  // never let an idle murmur overwrite a pending real reaction
+  if (idle && voiceRequest && !(voiceRequest & 0x80)) return;
+  voiceRequest = code | (idle ? 0x80 : 0);
+}
+
+void playRobotSound(const String& soundMood) {
+  requestVoice(soundMood, false);
+  lastMoodSoundAt = millis();
+}
+
+void scheduleNextIdleSound() {
+  // A living companion should make occasional expressive beeps while awake, but remain quiet enough
+  // not to become an irritating alarm. Sleep has a slower, softer vocal rhythm.
+  if (mood == "SLEEPY") {
+    // Dream chirps are deliberately sparse.
+    nextIdleSoundAt = millis() + 25000UL + (esp_random() % 30000UL);
+  } else {
+    // Leave quiet gaps between spontaneous sounds; event reactions remain immediate.
+    nextIdleSoundAt = millis() + 9000UL + (esp_random() % 13000UL);
+  }
+}
+
+void playIdleSound() {
+  // Short murmurs; the voice engine picks a phrase that fits the current mood.
+  requestVoice(mood, true);
+}
+
+void updateSoundPersonality() {
+  const unsigned long now = millis();
+  // Cancel both queued and scheduled idle audio for the entire sleep state.
+  if (mood == "SLEEPY") {
+    voiceRequest = 0;
+    noTone(PETBOT_PIEZO_PIN);
+    return;
+  }
+  if (!soundEnabled) return;
+  if (nextIdleSoundAt == 0) scheduleNextIdleSound();
+
+  // Let event reactions finish before idle chatter resumes.
+  if (now < moodOverrideUntil) {
+    if (now >= nextIdleSoundAt) scheduleNextIdleSound();
+    return;
+  }
+
+  // Spontaneous sounds are only for awake moods.
+  if (now >= nextIdleSoundAt && now - lastSoundEvent > 1800UL) {
+    playIdleSound();
+    lastMoodSoundAt = now;
+    scheduleNextIdleSound();
+  }
+}
+
+void sampleIRSensor() {
+  if (!irEnabled) return;
+  const unsigned long now = millis();
+  const int level = digitalRead(PETBOT_IR_PIN);
+
+  if (!irInitialized) {
+    irStableLevel = level;
+    irCandidateLevel = level;
+    irCandidateSince = now;
+    irInitialized = true;
+    Serial.printf("IR sensor ready: GPIO%d initial level=%d (active=%d)\\n", PETBOT_IR_PIN, level, PETBOT_IR_ACTIVE_LEVEL);
+    return;
+  }
+
+  if (level != irCandidateLevel) {
+    irCandidateLevel = level;
+    irCandidateSince = now;
+    return;
+  }
+
+  // Ignore short TX glitches; a real obstacle state must remain stable for 35 ms.
+  if (level == irStableLevel || now - irCandidateSince < 35UL) return;
+  irStableLevel = level;
+  Serial.printf("IR sensor GPIO%d stable level=%d\\n", PETBOT_IR_PIN, level);
+
+  // Trigger only when the sensor reports its configured active obstacle level.
+  if (level != PETBOT_IR_ACTIVE_LEVEL || now - irLastEventAt < 1000UL) return;
+  irLastEventAt = now;
+  lastSoundEvent = now;
+  registerPetInteraction(false);
+  mood = "SURPRISED";
+  moodOverrideUntil = now + 2200UL;
+  nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+  gazeTargetX = (esp_random() & 1) ? -4.0f : 4.0f;
+  gazeTargetY = -1.0f;
+  microAction = "OBSTACLE";
+  microActionUntil = now + 900UL;
+  drawFace();
+  playRobotSound("SURPRISED");
+  Serial.println("PETBOT IR: obstacle detected");
+}
+
+String jsonStringField(const String& json, const String& key) {
+  String needle = "\"" + key + "\"";
+  int keyAt = key == "command"
+      ? json.lastIndexOf(needle)
+      : json.indexOf(needle);
+
+  if (keyAt < 0) return "";
+
+  int colon = json.indexOf(':', keyAt + needle.length());
+  if (colon < 0) return "";
+
+  // The value must start right after the colon. Without this check
+  // "command":null made the parser grab the NEXT key ("poll_after_ms")
+  // and every idle poll looked like user activity.
+  int valueAt = colon + 1;
+  while (valueAt < (int)json.length() && json[valueAt] == ' ') valueAt++;
+  if (valueAt >= (int)json.length() || json[valueAt] != '"') return "";
+
+  int endQuote = json.indexOf('"', valueAt + 1);
+  if (endQuote < 0) return "";
+
+  return json.substring(valueAt + 1, endQuote);
+}
+
+static int batteryPercentFromVoltage(float v) {
+  if (v <= 3.30f) return 0;
+  if (v >= 4.20f) return 100;
+  const float volts[] = {3.30f, 3.50f, 3.60f, 3.70f, 3.75f, 3.80f, 3.90f, 4.00f, 4.10f, 4.20f};
+  const int pct[] = {0, 5, 12, 25, 35, 48, 65, 78, 90, 100};
+  for (int i = 1; i < 10; i++) {
+    if (v <= volts[i]) {
+      float f = (v - volts[i - 1]) / (volts[i] - volts[i - 1]);
+      return (int)roundf(pct[i - 1] + f * (pct[i] - pct[i - 1]));
+    }
+  }
+  return 100;
+}
+
+void updateBattery() {
+  const unsigned long now = millis();
+  if (now - lastBatteryRead < 5000UL) return;
+  lastBatteryRead = now;
+  uint32_t totalMv = 0;
+  for (int i = 0; i < 12; i++) {
+    totalMv += analogReadMilliVolts(PETBOT_BATTERY_PIN);
+    delayMicroseconds(250);
+  }
+  const float measured = (totalMv / 12.0f) * PETBOT_BATTERY_DIVIDER / 1000.0f;
+  if (measured < 2.5f || measured > 5.0f) return;
+  batteryVoltage = batteryVoltage <= 0.0f ? measured : batteryVoltage * 0.72f + measured * 0.28f;
+  batteryPercent = batteryPercentFromVoltage(batteryVoltage);
+
+  // This board exposes battery voltage, not a dedicated charger-status signal.
+  // Infer charging only from a sustained voltage rise.
+  if (batteryTrendAt == 0) {
+    batteryTrendAt = now;
+    batteryTrendStart = batteryVoltage;
+  } else if (now - batteryTrendAt >= 30000UL) {
+    batteryCharging = batteryVoltage > batteryTrendStart + 0.025f;
+    batteryTrendAt = now;
+    batteryTrendStart = batteryVoltage;
+  }
+
+  if (batteryPercent <= 15 && !batteryLowAlerted) {
+    batteryLowAlerted = true;
+    batteryMoodUntil = now + 7000UL;
+    mood = "SLEEPY";
+    petEnergy = min(petEnergy, 18);
+    playRobotSound("SLEEPY");
+    Serial.println(String(petName) + ": low battery");
+  } else if (batteryPercent >= 22) {
+    batteryLowAlerted = false;
+  }
+
+  static bool wasCharging = false;
+  if (batteryCharging && !wasCharging && batteryPercent > 15) {
+    batteryMoodUntil = now + 5000UL;
+    mood = "HAPPY";
+    petMoodValue = min(100, petMoodValue + 5);
+    playRobotSound("HAPPY");
+    Serial.println(String(petName) + ": charging detected");
+  }
+  wasCharging = batteryCharging;
+  drawFace();
+}
+
+
+static uint8_t petbotFaceOpen[704];
+static uint8_t petbotFaceGlance[704];
+static bool petbotFaceBitmapsReady = false;
+
+static int petbotB64Value(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+  if (c >= '0' && c <= '9') return c - '0' + 52;
+  if (c == '+') return 62;
+  if (c == '/') return 63;
+  return -1;
+}
+
+static void decodePetbotFace(const char* encoded, uint8_t* bitmap) {
+  uint8_t packed[340];
+  size_t packedLen = 0;
+  uint32_t acc = 0;
+  int bits = 0;
+  for (size_t i = 0; encoded[i] && encoded[i] != '='; ++i) {
+    const int v = petbotB64Value(encoded[i]);
+    if (v < 0) continue;
+    acc = (acc << 6) | (uint32_t)v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (packedLen < sizeof(packed)) packed[packedLen++] = (uint8_t)((acc >> bits) & 0xFF);
+    }
+  }
+  size_t out = 0;
+  for (size_t i = 0; i + 1 < packedLen && out < 704; i += 2) {
+    const uint8_t count = packed[i];
+    const uint8_t value = packed[i + 1];
+    for (uint16_t n = 0; n < count && out < 704; ++n) bitmap[out++] = value;
+  }
+  while (out < 704) bitmap[out++] = 0;
+}
+
+static void ensurePetbotFaceBitmaps() {
+  if (petbotFaceBitmapsReady) return;
+  decodePetbotFace(PETBOT_FACE_OPEN_RLE, petbotFaceOpen);
+  decodePetbotFace(PETBOT_FACE_GLANCE_RLE, petbotFaceGlance);
+  petbotFaceBitmapsReady = true;
+}
+
+void drawFace() {
+  if (!displayReady) return;
+
+  const unsigned long t = millis();
+  if (mood != lastDrawnMood) {
+    lastDrawnMood = mood;
+    moodChangedAt = t;
+  }
+  // 1.0 right after an emotion starts, fading to 0 in half a second: every
+  // new emotion "pops" instead of just swapping pictures.
+  const float age = (float)(t - moodChangedAt);
+  const float onset = age < 500.0f ? 1.0f - age / 500.0f : 0.0f;
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+
+  // Jupiter identity and live battery status replace PET / Wi-Fi labels.
+  display.setCursor(3, 2);
+  display.print("JUPITER");
+  const int bx = 91, by = 2;
+  display.drawRect(bx, by, 25, 10, SSD1306_WHITE);
+  display.fillRect(bx + 25, by + 3, 3, 4, SSD1306_WHITE);
+  if (batteryPercent >= 0) {
+    const int fillW = constrain((batteryPercent * 21) / 100, 0, 21);
+    if (fillW > 0) display.fillRect(bx + 2, by + 2, fillW, 6, SSD1306_WHITE);
+    if (batteryCharging && ((t / 350UL) % 2UL) == 0) {
+      display.drawLine(bx + 12, by + 1, bx + 9, by + 5, SSD1306_BLACK);
+      display.drawLine(bx + 9, by + 5, bx + 14, by + 5, SSD1306_BLACK);
+      display.drawLine(bx + 14, by + 5, bx + 11, by + 9, SSD1306_BLACK);
+    }
+    display.setCursor(58, 2);
+    display.print(String(batteryPercent) + "%");
+  } else {
+    display.setCursor(58, 2);
+    display.print("--%");
+  }
+
+  if (notificationMessage.length() && (long)(notificationUntil - millis()) > 0) {
+    display.drawLine(4, 12, 123, 12, SSD1306_WHITE);
+    String remaining = notificationMessage;
+    int lines = 0;
+    display.setCursor(4, 17);
+    while (remaining.length() && lines < 4) {
+      int cut = remaining.length() > 20 ? 20 : remaining.length();
+      if (cut < remaining.length()) {
+        int spaceAt = remaining.lastIndexOf(' ', cut);
+        if (spaceAt > 0) cut = spaceAt;
+      }
+      display.println(remaining.substring(0, cut));
+      remaining = remaining.substring(cut);
+      remaining.trim();
+      lines++;
+    }
+    display.display();
+    return;
+  }
+
+  // Reference-sheet face: use the actual 18 expressions digitized from the user's image.
+  float bobY = 0.0f, swayX = 0.0f;
+  if (mood == "EXCITED") bobY = -2.0f * fabsf(sinf(t * 0.011f));
+  else if (mood == "HAPPY" || mood == "ECSTATIC") bobY = -1.0f * sinf(t * 0.006f);
+  else if (mood == "LOVE") bobY = -0.7f * sinf(t * 0.007f);
+  else if (mood == "SAD" || mood == "SLEEPY") bobY = 1.0f + 0.6f * sinf(t * 0.0025f);
+  else if (mood == "SCARED" || mood == "DIZZY") swayX = 1.2f * sinf(t * 0.018f);
+  else if (mood == "SHY") swayX = 1.5f * sinf(t * 0.0035f);
+  else if (mood == "PLAYFUL" || mood == "BORED") bobY = -1.2f * fabsf(sinf(t * 0.012f));
+
+  uint8_t expression = 3; // open round eyes
+  if (mood == "HAPPY" || mood == "PLAYFUL") expression = 0;
+  else if (mood == "DIZZY") expression = 1;
+  else if (mood == "CURIOUS" || mood == "SURPRISED") expression = 2;
+  else if (mood == "CALM" || mood == "IDLE") expression = 3;
+  else if (mood == "SHY") expression = 4;
+  else if (mood == "ANGRY" || mood == "FRUSTRATED") expression = 5;
+  else if (mood == "CONFUSED") expression = 6;
+  else if (mood == "ANNOYED") expression = 7;
+  else if (mood == "EXCITED" || mood == "ECSTATIC") expression = 8;
+  else if (mood == "LOVE") expression = 9;
+  else if (mood == "SCARED") expression = 10;
+  else if (mood == "SAD") expression = 11;
+  else if (mood == "SUSPICIOUS") expression = 12;
+  else if (mood == "BORED") expression = 13;
+  else if (mood == "CONTENT") expression = 14;
+  else if (mood == "WINK") expression = 15;
+  else if (mood == "SLEEPY") expression = 16;
+  else if (mood == "TIRED") expression = 17;
+
+  // The bitmap itself is 56x24 and is doubled to 112x48 on the OLED.
+  // Small independent gaze drift is added to open round-eye expressions.
+  const int faceX = 8 + (int)roundf(swayX) + (int)constrain((int)roundf(gazeX), -2, 2);
+  const int faceY = 14 + (int)roundf(bobY * 0.25f);
+  drawFaceExpression(display, expression, faceX, faceY);
+  if (expression == 2 || expression == 3 || expression == 11) {
+    const int pupilShift = (int)constrain((int)roundf(gazeX), -2, 2);
+    const int pupilY = faceY + 20 + (int)constrain((int)roundf(gazeY), -1, 1);
+    display.fillCircle(faceX + 17 + pupilShift, pupilY, 2, SSD1306_BLACK);
+    display.fillCircle(faceX + 94 + pupilShift, pupilY, 2, SSD1306_BLACK);
+    display.drawPixel(faceX + 16 + pupilShift, pupilY - 1, SSD1306_WHITE);
+    display.drawPixel(faceX + 93 + pupilShift, pupilY - 1, SSD1306_WHITE);
+  }
+  if (mood == "SLEEPY" || blinking) {
+    const int lidY = faceY + 15 + (int)roundf(1.5f * sinf(t * 0.003f));
+    display.fillRect(faceX + 4, faceY + 3, 104, 18, SSD1306_BLACK);
+    display.drawLine(faceX + 5, lidY, faceX + 107, lidY, SSD1306_WHITE);
+    if (mood == "SLEEPY") {
+      const int zPhase = (int)((t / 650UL) % 4UL);
+      if (zPhase >= 1) { display.setCursor(108, 21); display.print("z"); }
+      if (zPhase >= 2) { display.setCursor(114, 12); display.print("Z"); }
+    }
+  }
+
+  // Animated signature details: every mood has a living motion layer.
+  // Runs on the existing 15 fps face loop; no blocking delays.
+  const float phase = (float)t * 0.008f;
+  const int pulse = (int)roundf(2.0f + 2.0f * fabsf(sinf(phase)));
+  if (mood == "HAPPY" || mood == "PLAYFUL" || mood == "LOVE" ||
+      mood == "SHY" || mood == "ECSTATIC") {
+    const int blush = (int)((sinf(phase * 0.55f) + 1.0f) * 1.5f);
+    for (int k = 0; k < blush; k++) {
+      display.drawPixel(15 + k * 2, 48 + (k % 2), SSD1306_WHITE);
+      display.drawPixel(109 + k * 2, 48 + (k % 2), SSD1306_WHITE);
+    }
+  }
+  if (mood == "PLAYFUL") {
+    const bool winkLeft = ((t / 850UL) % 2UL) == 0;
+    if ((t % 1700UL) < 170UL) {
+      const int wx = faceX + (winkLeft ? 16 : 96);
+      const int winkY = faceY + 15;
+      display.fillRect(wx - 15, winkY - 3, 30, 8, SSD1306_BLACK);
+      display.drawLine(wx - 13, winkY + 2, wx, winkY - 4, SSD1306_WHITE);
+      display.drawLine(wx, winkY - 4, wx + 13, winkY + 2, SSD1306_WHITE);
+    }
+    const int sparkleY = 17 + (int)roundf(3.0f * sinf(phase * 1.7f));
+    display.drawLine(64 - pulse, sparkleY, 64 + pulse, sparkleY, SSD1306_WHITE);
+    display.drawLine(64, sparkleY - pulse, 64, sparkleY + pulse, SSD1306_WHITE);
+  } else if (mood == "CURIOUS" || mood == "CONFUSED") {
+    display.setTextSize(1);
+    display.setCursor(111, 17 + (int)roundf(3.0f * sinf(phase)));
+    display.print(mood == "CONFUSED" ? "?" : ".");
+  } else if (mood == "HAPPY" || mood == "ECSTATIC" || mood == "EXCITED") {
+    const int sx = 12 + (int)((t / 55UL) % 105UL);
+    const int sy = 18 + (int)roundf(2.0f * sinf(phase * 1.8f));
+    display.drawPixel(sx, sy, SSD1306_WHITE);
+    display.drawPixel(127 - sx, sy + 5, SSD1306_WHITE);
+  } else if (mood == "SUSPICIOUS") {
+    const int scanX = 28 + (int)((t / 45UL) % 72UL);
+    display.drawPixel(scanX, 19, SSD1306_WHITE);
+    display.drawPixel(scanX + 1, 20, SSD1306_WHITE);
+  } else if (mood == "FRUSTRATED" || mood == "ANNOYED") {
+    const int j = (int)((t / 65UL) % 3UL) - 1;
+    display.drawLine(18 + j, 20, 22 + j, 15, SSD1306_WHITE);
+    display.drawLine(105 - j, 15, 109 - j, 20, SSD1306_WHITE);
+  } else if (mood == "SCARED") {
+    const int sy = 15 + (int)roundf(3.0f * sinf(phase * 2.2f));
+    display.drawPixel(117, sy, SSD1306_WHITE);
+    display.drawPixel(116, sy + 1, SSD1306_WHITE);
+    display.drawPixel(118, sy + 1, SSD1306_WHITE);
+  } else if (mood == "SAD") {
+    const int ty = 47 + (int)roundf(3.0f * fabsf(sinf(phase * 0.7f)));
+    display.drawPixel(18, ty, SSD1306_WHITE);
+    display.drawPixel(19, ty + 1, SSD1306_WHITE);
+  } else if (mood == "BORED") {
+    const int yawn = (int)roundf(2.0f + 3.0f * fabsf(sinf((float)t * 0.0012f)));
+    display.fillRoundRect(60, 53, 8, yawn, 3, SSD1306_WHITE);
+  } else if (mood == "SLEEPY") {
+    const int breath = (int)roundf(2.0f * sinf((float)t * 0.0018f));
+    display.drawPixel(112, 27 + breath, SSD1306_WHITE);
+  } else if (mood == "DIZZY") {
+    const int sx = 64 + (int)roundf(18.0f * cosf(phase));
+    const int sy = 18 + (int)roundf(5.0f * sinf(phase));
+    display.drawPixel(sx, sy, SSD1306_WHITE);
+    display.drawPixel(sx + 1, sy, SSD1306_WHITE);
+  } else if (mood == "SURPRISED") {
+    const int ray = 2 + (int)roundf(3.0f * fabsf(sinf(phase * 1.5f)));
+    display.drawLine(18, 25 - ray, 18, 25 + ray, SSD1306_WHITE);
+    display.drawLine(110, 25 - ray, 110, 25 + ray, SSD1306_WHITE);
+  }
+
+  display.display();
+}
+
+bool cloudRequest(
+    const char* path,
+    const String& method,
+    const String& body,
+    String* responseBody
+) {
+  if (WiFi.status() != WL_CONNECTED ||
+      deviceToken.length() < 32) {
+    return false;
+  }
+
+  HTTPClient http;
+  String url = String(CLOUD_BASE) + path;
+
+  if (!http.begin(url)) return false;
+
+  http.setTimeout(4500);
+  http.addHeader(
+      "Authorization", String("Bearer ") + deviceToken
+  );
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Accept", "application/json");
+
+  int status = method == "POST"
+      ? http.POST(body)
+      : http.GET();
+
+  bool ok = status >= 200 && status < 300;
+
+  if (responseBody && status > 0) {
+    *responseBody = http.getString();
+  }
+
+  if (!ok && status > 0) {
+    Serial.printf("Cloud request failed: %s -> HTTP %d\n", path, status);
+  }
+
+  http.end();
+  return ok;
+}
+
+String buildHeartbeatBody() {
+  String body =
+      "{\"firmware\":\"" + String(FIRMWARE_VERSION) +
+      "\",\"wifi_rssi\":" + String(WiFi.RSSI()) +
+      ",\"free_heap\":" + String(ESP.getFreeHeap()) +
+      ",\"ip\":\"" + WiFi.localIP().toString() +
+      "\",\"mood\":\"" + mood +
+      "\",\"drives\":{\"curiosity\":" + String(petCuriosity) +
+      ",\"energy\":" + String(petEnergy) +
+      ",\"mood_value\":" + String(petMoodValue) +
+      ",\"attachment\":" + String(petAttachment) +
+      ",\"stimulation\":" + String(petStimulation) +
+      ",\"social_need\":" + String(petSocialNeed) +
+      ",\"confidence\":" + String(petConfidence) +
+      "},\"autonomy\":true,\"battery_mv\":null,"
+      "\"uv_sensor_connected\":false,"
+      "\"camera_connected\":false,"
+      "\"motors_enabled\":false}";
+
+  return body;
+}
+
+// ---------------------------------------------------------------------------
+// Cloud I/O lives in its own task. An HTTPS request takes hundreds of
+// milliseconds; run from loop() it froze the face every few seconds. Now the
+// task only fetches / posts, and loop() consumes the result, so the animation
+// never stalls. After any cloud event it polls every 1.5 s for a minute so a
+// conversation feels immediate; otherwise every 5 s to stay inside free-tier
+// limits.
+// ---------------------------------------------------------------------------
+SemaphoreHandle_t cloudMutex = nullptr;
+String cloudInbox;                  // latest /poll response (written by cloudTask)
+volatile bool cloudInboxReady = false;
+String cloudOutbox;                 // heartbeat body (written by loop)
+volatile bool cloudOutboxReady = false;
+volatile unsigned long cloudFastPollUntil = 0;
+
+void sendHeartbeat() {
+  if (!cloudMutex) return;
+  String body = buildHeartbeatBody();
+  xSemaphoreTake(cloudMutex, portMAX_DELAY);
+  cloudOutbox = body;
+  cloudOutboxReady = true;
+  xSemaphoreGive(cloudMutex);
+}
+
+void cloudTask(void*) {
+  unsigned long lastPollAt = 0;
+  for (;;) {
+    if (WiFi.status() != WL_CONNECTED) { delay(500); continue; }
+
+    if (cloudOutboxReady) {
+      String body;
+      xSemaphoreTake(cloudMutex, portMAX_DELAY);
+      body = cloudOutbox;
+      cloudOutboxReady = false;
+      xSemaphoreGive(cloudMutex);
+      if (cloudRequest("/api/device/heartbeat", "POST", body, nullptr)) {
+        Serial.println("PETBOT heartbeat OK");
+      }
+    }
+
+    const unsigned long now = millis();
+    const unsigned long every = ((long)(now - cloudFastPollUntil) < 0) ? 1500UL : 5000UL;
+    if (!cloudInboxReady && now - lastPollAt >= every) {
+      lastPollAt = now;
+      String response;
+      if (cloudRequest("/api/device/poll", "GET", "", &response)) {
+        xSemaphoreTake(cloudMutex, portMAX_DELAY);
+        cloudInbox = response;
+        cloudInboxReady = true;
+        xSemaphoreGive(cloudMutex);
+      }
+    }
+    delay(40);
+  }
+}
+
+// A chat reply from the cloud brain: the face is the robot's own emotion, the
+// impulse tells the local drive model how the conversation affected it.
+void applyChatEvent(String face, String impulse, bool faceAlreadyApplied) {
+  face.toUpperCase();
+  impulse.toUpperCase();
+
+  if (impulse == "AFFECTION") {
+    registerPetInteraction(true);
+  } else if (impulse == "PRAISE") {
+    registerPetInteraction(false);
+    petConfidence = min(100, petConfidence + 6);
+    petMoodValue = min(100, petMoodValue + 4);
+  } else if (impulse == "SCOLD") {
+    lastActivity = millis();
+    petConfidence = max(0, petConfidence - 6);
+    petMoodValue = max(0, petMoodValue - 8);
+    petStimulation = min(100, petStimulation + 10);
+    petSocialNeed = max(0, petSocialNeed - 6);
+  } else {
+    registerPetInteraction(false);  // plain conversation is still social contact
+  }
+
+  const bool validFace =
+      face == "HAPPY" || face == "CURIOUS" || face == "SLEEPY" ||
+      face == "SURPRISED" || face == "ANNOYED" || face == "LOVE" ||
+      face == "SAD" || face == "EXCITED" || face == "SHY" ||
+      face == "CONFUSED" || face == "BORED" || face == "SCARED" ||
+      face == "PLAYFUL" || face == "DIZZY" || face == "SUSPICIOUS" ||
+      face == "FRUSTRATED" || face == "ECSTATIC";
+  if (validFace) {
+    mood = face;
+    lastCloudMood = face;
+    if (!faceAlreadyApplied) playRobotSound(mood);
+    moodOverrideUntil = millis() + 12000UL;
+    lastActivity = millis();
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    drawFace();
+  }
+  if (millis() - lastNeedsSave > 60000UL) savePetNeeds();
+  Serial.println("Chat event: " + face + " / " + impulse);
+}
+
+void handlePollResponse(const String& response) {
+
+  // The cloud can send either "mood" or "emotion". Prefer an explicit
+  // emotion so chat replies can drive the face without a separate button.
+  String receivedMood = jsonStringField(response, "emotion");
+  if (!receivedMood.length()) receivedMood = jsonStringField(response, "mood");
+  receivedMood.toUpperCase();
+
+  const bool validMood =
+      receivedMood == "HAPPY" ||
+      receivedMood == "CURIOUS" ||
+      receivedMood == "SLEEPY" ||
+      receivedMood == "SURPRISED" ||
+      receivedMood == "ANNOYED" ||
+      receivedMood == "LOVE" ||
+      receivedMood == "SAD" || receivedMood == "EXCITED" ||
+      receivedMood == "SHY" || receivedMood == "CONFUSED" ||
+      receivedMood == "BORED" || receivedMood == "SCARED" ||
+      receivedMood == "PLAYFUL" || receivedMood == "DIZZY" || receivedMood == "SUSPICIOUS" ||
+      receivedMood == "FRUSTRATED" || receivedMood == "ECSTATIC";
+
+  bool moodAppliedNow = false;
+  if (validMood && receivedMood != lastCloudMood) {
+    moodAppliedNow = true;
+    lastCloudMood = receivedMood;
+    mood = receivedMood;
+    playRobotSound(mood);
+    moodOverrideUntil = millis() + 12000UL;
+    lastActivity = millis();
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+
+    Serial.println("Cloud emotion: " + mood);
+    drawFace();
+  }
+
+  String command = jsonStringField(response, "command");
+  command.toUpperCase();
+  if (command.length() || moodAppliedNow) cloudFastPollUntil = millis() + 60000UL;
+
+  if (command == "CHAT_EVENT") {
+    applyChatEvent(jsonStringField(response, "face"),
+                   jsonStringField(response, "impulse"), moodAppliedNow);
+    return;
+  }
+
+  // Also accept direct expression commands from the admin/chat backend.
+  if (command == "HAPPY" || command == "CURIOUS" ||
+      command == "SLEEPY" || command == "SURPRISED" ||
+      command == "ANNOYED" || command == "LOVE" ||
+      command == "SAD" || command == "EXCITED" ||
+      command == "SHY" || command == "CONFUSED" ||
+      command == "BORED" || command == "SCARED" ||
+      command == "PLAYFUL" || command == "DIZZY" || command == "SUSPICIOUS" ||
+      command == "FRUSTRATED" || command == "ECSTATIC") {
+    if (command != lastCloudMood) {
+      lastCloudMood = command;
+      mood = command;
+      playRobotSound(mood);
+      moodOverrideUntil = millis() + 12000UL;
+      lastActivity = millis();
+      nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+      drawFace();
+    }
+    return;
+  }
+
+  if (command == "MESSAGE") {
+    notificationMessage = jsonStringField(response, "message");
+    if (notificationMessage.length()) {
+      notificationUntil = millis() + 6000UL;
+      lastActivity = millis();
+      Serial.println("Cloud notification received.");
+      drawFace();
+    }
+  } else if (command.length()) {
+    Serial.println("Cloud command: " + command);
+
+    lastActivity = millis();
+    moodOverrideUntil = millis() + 8000UL;
+
+    if (command == "SLEEP") {
+      mood = "SLEEPY";
+      playRobotSound("SLEEPY");
+    } else if (command == "WAKE" || command == "PING") {
+      mood = "CURIOUS";
+      playRobotSound("CURIOUS");
+    } else if (command == "LOOK_AROUND") {
+      mood = "SURPRISED";
+      playRobotSound("SURPRISED");
+    } else if (command == "PET" || command == "LOVE") {
+      registerPetInteraction(true);
+      mood = "LOVE";
+      moodOverrideUntil = millis() + 9000UL;
+      playRobotSound("LOVE");
+    } else if (command == "PLAY") {
+      playRobotSound("HAPPY");
+    } else if (command == "MUTE" || command == "SOUND_OFF") {
+      soundEnabled = false;
+      petbotPrefs.begin("petbot", false);
+      petbotPrefs.putBool("sound", false);
+      petbotPrefs.end();
+    } else if (command == "UNMUTE" || command == "SOUND_ON") {
+      soundEnabled = true;
+      petbotPrefs.begin("petbot", false);
+      petbotPrefs.putBool("sound", true);
+      petbotPrefs.end();
+      playRobotSound("HAPPY");
+    }
+
+    drawFace();
+  }
+}
+
+void printPetbotHelp() {
+  Serial.println("PETBOT commands:");
+  Serial.println("STATUS - connection, mood, sound, IR sensor, interactions");
+  Serial.println("HELP - show commands");
+  Serial.println("PET - affectionate reaction");
+  Serial.println("PLAY - happy sound");
+  Serial.println("SOUND:ON / SOUND:OFF");
+  Serial.println("TOUCH:ON / TOUCH:OFF / TOUCH:READ - optional touch wire on GPIO4");
+  Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD|PLAYFUL|DIZZY|SUSPICIOUS|FRUSTRATED|ECSTATIC / PURR");
+  Serial.println("IR:ON / IR:OFF - enable or disable IR obstacle sensor on GPIO34");
+  Serial.println("IR:READ - read current IR sensor TX logic level");
+  Serial.println("NEEDS - show all internal state dimensions");
+  Serial.println("EVENT:SOUND / EVENT:SUCCESS / EVENT:FAIL - simulate sensor/outcome");
+  Serial.println("WAKE / SLEEP - test sleep and wake behavior");
+}
+
+void handleSerialProvisioning() {
+  if (!Serial.available()) return;
+
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+
+  if (line.startsWith("TOKEN:")) {
+    String candidate = line.substring(6);
+    candidate.trim();
+
+    if (candidate.length() >= 32 &&
+        candidate.length() <= 200) {
+
+      petbotPrefs.begin("petbot", false);
+      size_t saved = petbotPrefs.putString(
+          "device_token", candidate
+      );
+      petbotPrefs.end();
+
+      if (saved > 0) {
+        deviceToken = candidate;
+        Serial.println(
+            "PETBOT token saved in ESP32 NVS."
+        );
+      } else {
+        Serial.println(
+            "ERROR: token could not be saved."
+        );
+      }
+    } else {
+      Serial.println(
+          "Invalid token length; expected 32-200 characters."
+      );
+    }
+  } else if (line == "STATUS") {
+    Serial.println(String("Firmware: ") + FIRMWARE_VERSION);
+    Serial.println(String("Token configured: ") + (deviceToken.length() >= 32 ? "YES" : "NO"));
+    Serial.println(String("Wi-Fi connected: ") + (WiFi.status() == WL_CONNECTED ? "YES" : "NO"));
+    Serial.println(String("Mood: ") + mood);
+    Serial.println(String("Sound enabled: ") + (soundEnabled ? "YES" : "NO"));
+    Serial.println(String("IR enabled: ") + (irEnabled ? "YES" : "NO"));
+    Serial.println(String("IR GPIO34 level: ") + digitalRead(PETBOT_IR_PIN));
+    Serial.println(String("Interactions: ") + interactionCount);
+    Serial.println(String("Needs C/E/M/A: ") + petCuriosity + "/" + petEnergy + "/" + petMoodValue + "/" + petAttachment);
+    Serial.println(String("Vector model S/S/C: ") + petStimulation + "/" + petSocialNeed + "/" + petConfidence);
+    Serial.println(String("Free heap: ") + ESP.getFreeHeap());
+  } else if (line == "HELP") {
+    printPetbotHelp();
+  } else if (line == "NEEDS") {
+    Serial.printf("PETBOT state: curiosity=%d energy=%d mood=%d attachment=%d stimulation=%d social_need=%d confidence=%d interactions=%lu\n", petCuriosity, petEnergy, petMoodValue, petAttachment, petStimulation, petSocialNeed, petConfidence, interactionCount);
+  } else if (line == "EVENT:SOUND") {
+    petStimulation = min(100, petStimulation + 28);
+    petConfidence = max(0, petConfidence - 1);
+    lastActivity = millis();
+    mood = "SURPRISED";
+    moodOverrideUntil = millis() + 2200UL;
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    gazeTargetX = (esp_random() & 1) ? -5.0f : 5.0f;
+    gazeTargetY = -1.0f;
+    microAction = "WIDE_EYES";
+    microActionUntil = millis() + 650UL;
+    playRobotSound("SURPRISED");
+    drawFace();
+    Serial.println("Test event: sudden sound");
+  } else if (line == "EVENT:SUCCESS") {
+    petConfidence = min(100, petConfidence + 8);
+    petMoodValue = min(100, petMoodValue + 4);
+    petStimulation = max(0, petStimulation - 5);
+    if (millis() - lastNeedsSave > 60000UL) savePetNeeds();
+    Serial.println("Test outcome: confidence increased.");
+  } else if (line == "EVENT:FAIL") {
+    petConfidence = max(0, petConfidence - 8);
+    petMoodValue = max(0, petMoodValue - 4);
+    petStimulation = min(100, petStimulation + 10);
+    if (millis() - lastNeedsSave > 60000UL) savePetNeeds();
+    Serial.println("Test outcome: confidence decreased.");
+  } else if (line == "WAKE") {
+    registerPetInteraction(false);
+    mood = "SURPRISED";
+    moodOverrideUntil = millis() + 2500UL;
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    eyesOpen = true;
+    playRobotSound("SURPRISED");
+    drawFace();
+    Serial.println("PETBOT woke up.");
+  } else if (line == "SLEEP") {
+    mood = "SLEEPY";
+    moodOverrideUntil = millis() + 5000UL;
+    eyesOpen = false;
+    playRobotSound("SLEEPY");
+    drawFace();
+    Serial.println("PETBOT entering sleep.");
+  } else if (line == "PET") {
+    registerPetInteraction(true);
+    mood = "LOVE";
+    moodOverrideUntil = millis() + 9000UL;
+    nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+    playRobotSound("LOVE");
+    drawFace();
+    Serial.println("PETBOT: happy to see you!");
+  } else if (line == "PLAY") {
+    playRobotSound("HAPPY");
+  } else if (line.startsWith("VOICE:")) {
+    String m = line.substring(6);
+    m.toUpperCase();
+    requestVoice(m, false);
+    Serial.println("Voice test: " + m);
+  } else if (line == "TOUCH:ON") {
+    touchEnabled = true;
+    calibrateTouch();
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("touch_en", touchEnabled);
+    petbotPrefs.end();
+    Serial.println(touchEnabled ? "Touch pad enabled." : "Touch pad NOT enabled.");
+  } else if (line == "TOUCH:OFF") {
+    touchEnabled = false;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("touch_en", false);
+    petbotPrefs.end();
+    Serial.println("Touch pad disabled.");
+  } else if (line == "TOUCH:READ") {
+    Serial.println("Touch raw=" + String(touchRead(PETBOT_TOUCH_PIN)) + " baseline=" + String(touchBaseline));
+  } else if (line == "PURR") {
+    requestVoice("LOVE", false);
+  } else if (line == "SOUND:ON") {
+    soundEnabled = true;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("sound", true);
+    petbotPrefs.end();
+    Serial.println("Sound enabled.");
+  } else if (line == "SOUND:OFF") {
+    soundEnabled = false;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("sound", false);
+    petbotPrefs.end();
+    Serial.println("Sound muted.");
+  } else if (line == "IR:ON") {
+    irEnabled = true;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("ir_enabled", true);
+    petbotPrefs.end();
+    Serial.println("IR obstacle sensor enabled.");
+  } else if (line == "IR:OFF") {
+    irEnabled = false;
+    petbotPrefs.begin("petbot", false);
+    petbotPrefs.putBool("ir_enabled", false);
+    petbotPrefs.end();
+    Serial.println("IR obstacle sensor disabled.");
+  } else if (line == "IR:READ") {
+    Serial.printf("IR GPIO34 level=%d; configured obstacle level=%d\\n", digitalRead(PETBOT_IR_PIN), PETBOT_IR_ACTIVE_LEVEL);
+  } else if (line.length()) {
+    Serial.println("Unknown command. Type HELP.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Physical interaction with no extra parts:
+//  * BOOT button (GPIO26, active low): 1 click = pet, 2 clicks = play,
+//    3+ clicks = poke (he gets annoyed), long press (1.5 s) = sleep / wake.
+//  * Optional touch pad: a bare wire or foil on PETBOT_TOUCH_PIN (ESP32
+//    capacitive touch, no module needed). Off by default; enable with TOUCH:ON.
+// ---------------------------------------------------------------------------
+volatile bool btnDown = false;
+volatile bool btnReleased = false;
+volatile uint32_t btnPressAt = 0;
+volatile uint32_t btnReleaseAt = 0;
+volatile uint32_t btnLastEdge = 0;
+uint8_t btnClicks = 0;
+uint32_t btnLastClickAt = 0;
+
+void IRAM_ATTR onButtonEdge() {
+  const uint32_t now = millis();
+  if (now - btnLastEdge < 25) return;  // debounce
+  btnLastEdge = now;
+  if (digitalRead(PETBOT_BUTTON_PIN) == LOW) {
+    btnDown = true;
+    btnPressAt = now;
+  } else if (btnDown) {
+    btnDown = false;
+    btnReleaseAt = now;
+    btnReleased = true;
+  }
+}
+
+static void ownerReact(const String& newMood, unsigned long holdMs) {
+  mood = newMood;
+  lastCloudMood = "";  // so the same cloud mood can be applied again later
+  moodOverrideUntil = millis() + holdMs;
+  nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+  eyesOpen = true;
+  playRobotSound(newMood);
+  drawFace();
+}
+
+void ownerPet() {
+  registerPetInteraction(true);
+  ownerReact("LOVE", 9000UL);
+  Serial.println("Owner: pet");
+}
+
+void ownerPlay() {
+  registerPetInteraction(false);
+  petStimulation = min(100, petStimulation + 8);
+  ownerReact("HAPPY", 6000UL);
+  Serial.println("Owner: play");
+}
+
+void ownerPoke() {
+  lastActivity = millis();
+  petMoodValue = max(0, petMoodValue - 6);
+  petStimulation = min(100, petStimulation + 8);
+  petSocialNeed = max(0, petSocialNeed - 4);
+  ownerReact("ANNOYED", 6000UL);
+  Serial.println("Owner: poke");
+}
+
+void ownerToggleSleep() {
+  if (mood == "SLEEPY") {
+    registerPetInteraction(false);
+    ownerReact("SURPRISED", 2500UL);
+    Serial.println("Owner: wake");
+  } else {
+    ownerReact("SLEEPY", 8000UL);
+    eyesOpen = false;
+    drawFace();
+    Serial.println("Owner: sleep");
+  }
+}
+
+void calibrateTouch() {
+  long sum = 0;
+  for (int i = 0; i < 25; i++) {
+    sum += touchRead(PETBOT_TOUCH_PIN);
+    delay(10);
+  }
+  touchBaseline = (int)(sum / 25);
+  Serial.println("Touch baseline: " + String(touchBaseline) + " (don't touch the pad while calibrating)");
+  if (touchBaseline < 15) {
+    touchEnabled = false;
+    Serial.println("Touch disabled: baseline too low. Check wiring / pin number.");
+  }
+}
+
+void updatePhysicalInput() {
+  const uint32_t now = millis();
+
+  if (btnReleased) {
+    btnReleased = false;
+    const uint32_t held = btnReleaseAt - btnPressAt;
+    if (held >= 1500UL) {
+      btnClicks = 0;
+      ownerToggleSleep();
+    } else {
+      btnClicks++;
+      btnLastClickAt = btnReleaseAt;
+    }
+  }
+  if (btnClicks && now - btnLastClickAt > 350UL) {
+    const uint8_t n = btnClicks;
+    btnClicks = 0;
+    if (n == 1) ownerPet();
+    else if (n == 2) ownerPlay();
+    else ownerPoke();
+  }
+
+  if (!touchEnabled) return;
+  static uint32_t lastTouchRead = 0, touchStartAt = 0, touchLastSeenAt = 0, touchLastPetAt = 0, touchLastPurrAt = 0;
+  static uint8_t touchHits = 0;
+  static bool touchHeld = false;
+  if (now - lastTouchRead < 40UL) return;
+  lastTouchRead = now;
+  const int v = touchRead(PETBOT_TOUCH_PIN);
+  const bool touched = touchBaseline > 0 && v < touchBaseline * 65 / 100;  // classic ESP32: value drops on touch
+  touchHits = touched ? (uint8_t)min(255, touchHits + 1) : 0;
+  if (touchHits >= 3) {  // ~120 ms of steady contact
+    touchLastSeenAt = now;
+    if (!touchHeld) {
+      touchHeld = true;
+      touchStartAt = now;
+      if (now - touchLastPetAt > 3000UL) {
+        touchLastPetAt = now;
+        ownerPet();
+      }
+    } else if (now - touchStartAt > 1500UL && now - touchLastPurrAt > 2500UL) {
+      // being stroked: keep purring and slowly feel better
+      touchLastPurrAt = now;
+      lastActivity = now;
+      moodOverrideUntil = now + 6000UL;
+      petSocialNeed = max(0, petSocialNeed - 4);
+      petMoodValue = min(100, petMoodValue + 2);
+      requestVoice("LOVE", false);
+    }
+  } else if (touchHeld && now - touchLastSeenAt > 400UL) {
+    touchHeld = false;
+  }
+}
+
+static unsigned long blinkGapFor(const String& m) {
+  if (m == "EXCITED" || m == "ECSTATIC" || m == "PLAYFUL") return 700UL + (esp_random() % 1200UL);
+  if (m == "SCARED" || m == "SUSPICIOUS") return 3000UL + (esp_random() % 2600UL);
+  if (m == "DIZZY") return 500UL + (esp_random() % 900UL);
+  if (m == "SLEEPY" || m == "BORED") return 2600UL + (esp_random() % 3200UL);
+  if (m == "SURPRISED") return 2800UL + (esp_random() % 2500UL);
+  return 1200UL + (esp_random() % 2200UL);
+}
+
+static unsigned long blinkLengthFor(const String& m) {
+  if (m == "SLEEPY") return 380UL;
+  if (m == "DIZZY" || m == "FRUSTRATED") return 65UL;
+  if (m == "BORED") return 280UL;
+  if (m == "SCARED") return 70UL;
+  if (m == "EXCITED") return 90UL;
+  return 130UL;
+}
+
+// HTTPClient writes decoded response bytes into this adapter; UpdateClass is not a Stream.
+class FirmwareUpdateStream : public Stream {
+ public:
+  int available() override { return 0; }
+  int read() override { return -1; }
+  int peek() override { return -1; }
+  void flush() override {}
+  size_t write(uint8_t value) override { return Update.write(&value, 1); }
+  size_t write(const uint8_t* buffer, size_t size) override { return Update.write(const_cast<uint8_t*>(buffer), size); }
+};
+
+// Internet OTA: manifest format is two lines: version, then MD5 checksum.
+void checkForFirmwareUpdate() { return; /* OTA temporarily disabled until DevKit TLS bundle is configured. */
+#if 0
+  const unsigned long now = millis();
+  if (otaInProgress || WiFi.status() != WL_CONNECTED) return;
+  if (lastOtaCheck && now - lastOtaCheck < 6UL * 60UL * 60UL * 1000UL) return;
+  lastOtaCheck = now;
+
+  WiFiClientSecure secure;
+  secure.setCACertBundle(x509_crt_bundle, x509_crt_bundle_len);
+  HTTPClient http;
+  http.setTimeout(12000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!http.begin(secure, OTA_MANIFEST_URL)) return;
+  const int code = http.GET();
+  if (code != HTTP_CODE_OK) {
+    Serial.printf("OTA: manifest HTTP/TLS error %d\\n", code);
+    http.end();
+    return;
+  }
+  String manifest = http.getString();
+  http.end();
+  manifest.trim();
+
+  const int split = manifest.indexOf('\n');
+  if (split < 0) return;
+  String latestVersion = manifest.substring(0, split);
+  String expectedMd5 = manifest.substring(split + 1);
+  latestVersion.trim();
+  expectedMd5.trim();
+  if (!latestVersion.startsWith("petbot-") || expectedMd5.length() != 32) return;
+  if (latestVersion == FIRMWARE_VERSION) return;
+  // Reject malformed version strings and downgrades; only accept a newer x.y.z release.
+  int currentMajor = 0, currentMinor = 0, currentPatch = 0;
+  int latestMajor = 0, latestMinor = 0, latestPatch = 0;
+  if (sscanf(FIRMWARE_VERSION, "petbot-%d.%d.%d", &currentMajor, &currentMinor, &currentPatch) != 3 ||
+      sscanf(latestVersion.c_str(), "petbot-%d.%d.%d", &latestMajor, &latestMinor, &latestPatch) != 3) return;
+  const bool newer = latestMajor > currentMajor ||
+      (latestMajor == currentMajor && latestMinor > currentMinor) ||
+      (latestMajor == currentMajor && latestMinor == currentMinor && latestPatch > currentPatch);
+  if (!newer) { Serial.println("OTA: ignoring non-newer firmware version"); return; }
+
+  Serial.println("OTA: new firmware " + latestVersion);
+  otaInProgress = true;
+  WiFiClientSecure binClient;
+  binClient.setCACertBundle(x509_crt_bundle, x509_crt_bundle_len);
+  HTTPClient binHttp;
+  binHttp.setTimeout(30000);
+  binHttp.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  if (!binHttp.begin(binClient, OTA_FIRMWARE_URL)) { otaInProgress = false; return; }
+  const int binCode = binHttp.GET();
+  if (binCode != HTTP_CODE_OK) {
+    Serial.printf("OTA: download HTTP %d\\n", binCode);
+    binHttp.end(); otaInProgress = false; return;
+  }
+  const int length = binHttp.getSize();
+  Serial.printf("OTA: download size header = %d bytes\\n", length);
+  const size_t beginSize = length > 0 ? (size_t)length : UPDATE_SIZE_UNKNOWN;
+  if (!Update.begin(beginSize)) {
+    Serial.printf("OTA: Update.begin failed, error=%u\\n", Update.getError());
+    binHttp.end(); otaInProgress = false; return;
+  }
+  if (!Update.setMD5(expectedMd5.c_str())) {
+    Serial.println("OTA: invalid MD5");
+    Update.abort(); binHttp.end(); otaInProgress = false; return;
+  }
+
+  // Use HTTPClient's decoder so both Content-Length and chunked GitHub responses work.
+  FirmwareUpdateStream updateStream;
+  const int written = binHttp.writeToStream(&updateStream);
+  const bool lengthOk = length <= 0 || written == length;
+  const bool finished = written > 0 && lengthOk && Update.end(true);
+  binHttp.end();
+  if (!finished || !Update.isFinished()) {
+    Serial.printf("OTA: failed, wrote %d bytes (expected %d), update error=%u\\n",
+                  written, length, Update.getError());
+    Update.abort(); otaInProgress = false; return;
+  }
+  Serial.println("OTA: installed; rebooting");
+  delay(500);
+  ESP.restart();
+}
+
+#endif
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PETBOT_PIEZO_PIN, OUTPUT);
+  xTaskCreatePinnedToCore(voiceTask, "petbot_voice", 4096, NULL, 1, NULL, 0);
+  pinMode(PETBOT_IR_PIN, INPUT);
+  pinMode(PETBOT_BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PETBOT_BUTTON_PIN), onButtonEdge, CHANGE);
+  analogReadResolution(12);
+
+  petbotPrefs.begin("petbot", false);
+  deviceToken = petbotPrefs.getString("device_token", "");
+  petName = petbotPrefs.getString("pet_name", "Jupiter");
+  petbotPrefs.putString("pet_name", "Jupiter");
+  soundEnabled = petbotPrefs.getBool("sound", true);
+  irEnabled = petbotPrefs.getBool("ir_enabled", false);
+  interactionCount = petbotPrefs.getUInt("interactions", 0);
+  petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
+  petEnergy = constrain(petbotPrefs.getInt("energy", 88), 0, 100);
+  petMoodValue = constrain(petbotPrefs.getInt("mood_value", 68), 0, 100);
+  petAttachment = constrain(petbotPrefs.getInt("attachment", 12), 0, 100);
+  petStimulation = constrain(petbotPrefs.getInt("stimulation", 24), 0, 100);
+  petSocialNeed = constrain(petbotPrefs.getInt("social_need", 32), 0, 100);
+  petConfidence = constrain(petbotPrefs.getInt("confidence", 52), 0, 100);
+  petbotPrefs.end();
+  if (touchEnabled) calibrateTouch();
+
+  Serial.println(String("Hello! My name is ") + petName);
+  Serial.println(
+      String("PETBOT firmware ") + FIRMWARE_VERSION
+  );
+  Serial.println(
+      String("Device token configured: ") +
+      (deviceToken.length() >= 32 ? "YES" : "NO")
+  );
+  Serial.println(String("IR sensor GPIO34: ") + (irEnabled ? "ENABLED" : "DISABLED") + " | sound: " + (soundEnabled ? "ON" : "OFF"));
+  Serial.println("IMPORTANT: IR OUT must be 0-3.3V before connection to GPIO34.");
+  printPetbotHelp();
+
+  Wire.begin(OLED_SDA, OLED_SCL);
+  displayReady = display.begin(
+      SSD1306_SWITCHCAPVCC, OLED_ADDRESS
+  );
+
+  if (displayReady) drawFace();
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+
+  WiFiManager wifiManager;
+  wifiManager.setConfigPortalTimeout(30);
+  wifiManager.setConnectTimeout(8);
+  wifiManager.setTitle("PETBOT Wi-Fi setup");
+
+  Serial.println("Starting Wi-Fi provisioning");
+
+  if (displayReady) {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("PETBOT");
+    display.println("Wi-Fi setup");
+    display.println("AP: PETBOT-Setup");
+    display.println("Pass: PETBOT-4827");
+    display.println("Open 192.168.4.1");
+    display.display();
+  }
+
+  bool connected = wifiManager.autoConnect(
+      "PETBOT-Setup", "PETBOT-4827"
+  );
+
+  if (connected) {
+    Serial.println("Wi-Fi connected: " + WiFi.SSID());
+    Serial.println("IP address: " + WiFi.localIP().toString());
+  } else {
+    // Do not hold the local personality hostage to network setup.
+    Serial.println("Wi-Fi unavailable; starting PETBOT in offline autonomous mode.");
+    WiFi.disconnect(true, false);
+    WiFi.mode(WIFI_STA);
+  }
+
+  lastActivity = millis();
+  lastNeedsUpdate = millis();
+  wifiWasConnected = (WiFi.status() == WL_CONNECTED);
+
+  if (displayReady) {
+    display.clearDisplay();
+    display.setTextColor(SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println(String(petName) + " online");
+    display.println(WiFi.SSID());
+    display.println(WiFi.localIP());
+    display.display();
+    delay(1800);
+  }
+
+  drawFace();
+  playRobotSound("HAPPY");  // short boot-up greeting once the face is online
+  scheduleNextIdleSound();
+}
+
+String chooseAutonomousMood(const String& current) {
+  // A compact Vector-inspired state policy: internal drives bias actions;
+  // random variation is only used to avoid robotic repetition.
+  const unsigned long idleFor = millis() - lastActivity;
+  if (petEnergy < 14 || idleFor > 120000UL) return "SLEEPY";
+  const uint32_t roll = esp_random() % 100;
+
+  if (petConfidence < 18 && petStimulation >= 55) return roll < 60 ? "SCARED" : "ANNOYED";
+  if (petStimulation >= 78 && petMoodValue >= 72) return roll < 55 ? "ECSTATIC" : "EXCITED";
+  if (petStimulation >= 60 && petMoodValue >= 55) return roll < 60 ? "EXCITED" : "HAPPY";
+  if (petStimulation >= 72) return roll < 72 ? "SURPRISED" : "CURIOUS";
+  if (petAttachment < 25 && idleFor < 20000UL && roll < 30) return "SHY";
+  if (petStimulation < 30 && idleFor > 30000UL && idleFor <= 120000UL) return roll < 55 ? "BORED" : "CURIOUS";
+  if (petSocialNeed >= 78 && idleFor > 45000UL) {
+    if (petAttachment >= 35 && petMoodValue >= 35) return roll < 62 ? "LOVE" : "SAD";
+    return roll < 72 ? "SAD" : "CURIOUS";
+  }
+  if (petEnergy < 28) return "SLEEPY";
+  if (petConfidence < 24 && petStimulation >= 35) return roll < 55 ? "FRUSTRATED" : "SUSPICIOUS";
+  if (petCuriosity >= 82 && idleFor < 45000UL && roll < 22) return "PLAYFUL";
+  if (petCuriosity >= 72 && petStimulation > 40 && roll < 12) return "DIZZY";
+  if (petMoodValue < 30 && idleFor > 60000UL) return roll < 65 ? "SAD" : "CURIOUS";
+  if (petCuriosity >= 68) return roll < 58 ? "CURIOUS" : roll < 82 ? "SURPRISED" : "HAPPY";
+  if (petMoodValue >= 72 && petSocialNeed < 55) return roll < 55 ? "HAPPY" : "CURIOUS";
+
+  String next = roll < 44 ? "CURIOUS" : roll < 72 ? "HAPPY" : roll < 90 ? "SURPRISED" : "CONFUSED";
+  if (next == current) next = current == "CURIOUS" ? "HAPPY" : "CURIOUS";
+  return next;
+}
+
+void updateMicroAction() {
+  const unsigned long now = millis();
+
+  // Ease the eyes toward their target instead of jumping between positions.
+  const float easing = 0.22f;
+  float oldX = gazeX;
+  float oldY = gazeY;
+  float idleDriftX = 0.0f;
+  float idleDriftY = 0.0f;
+
+  const unsigned long idleFor = now - lastActivity;
+  if (now >= moodOverrideUntil && mood != "SLEEPY" && petEnergy >= 18) {
+    idleDriftX = 1.5f * sinf((float)now * 0.0016f + petCuriosity * 0.06f);
+    idleDriftY = 1.0f * cosf((float)now * 0.0013f + petMoodValue * 0.04f);
+    if (idleFor > 45000UL) {
+      idleDriftX *= 1.3f;
+      idleDriftY *= 1.4f;
+    }
+  }
+
+  gazeX += (gazeTargetX + idleDriftX - gazeX) * easing;
+  gazeY += (gazeTargetY + idleDriftY - gazeY) * easing;
+  if (fabsf(gazeTargetX + idleDriftX - gazeX) < 0.18f) gazeX = gazeTargetX + idleDriftX;
+  if (fabsf(gazeTargetY + idleDriftY - gazeY) < 0.18f) gazeY = gazeTargetY + idleDriftY;
+  bool gazeMoved = (fabsf(gazeX - oldX) > 0.15f || fabsf(gazeY - oldY) > 0.15f);
+
+  if (now < moodOverrideUntil || now < batteryMoodUntil || mood == "SLEEPY" || petEnergy < 18) {
+    gazeTargetX = 0.0f;
+    gazeTargetY = 0.0f;
+    microAction = "";
+    if (gazeMoved) drawFace();
+    nextMicroActionAt = now + 1200UL;
+    return;
+  }
+
+  if (microAction.length() && now >= microActionUntil) {
+    microAction = "";
+    gazeTargetX = 0.0f;
+    gazeTargetY = 0.0f;
+    nextMicroActionAt = now + 1600UL + (esp_random() % 2600UL);
+  }
+
+  if (!microAction.length()) {
+    if (nextMicroActionAt == 0) {
+      nextMicroActionAt = now + 1000UL + (esp_random() % 1600UL);
+    }
+    if (now >= nextMicroActionAt) {
+      // Small autonomous scenes: glances, excited eyes, surprise and a grumpy squint.
+      const uint32_t action = esp_random() % 12;
+      if (action == 0) {
+        microAction = "LOOK_LEFT"; gazeTargetX = -7.0f; gazeTargetY = 0.0f;
+      } else if (action == 1) {
+        microAction = "LOOK_RIGHT"; gazeTargetX = 7.0f; gazeTargetY = 0.0f;
+      } else if (action == 2) {
+        microAction = "LOOK_UP"; gazeTargetX = 0.0f; gazeTargetY = -5.0f;
+      } else if (action == 3) {
+        microAction = "LOOK_DIAGONAL"; gazeTargetX = 5.0f; gazeTargetY = -3.0f;
+      } else if (action == 4) {
+        microAction = "EXCITED"; gazeTargetX = 0.0f; gazeTargetY = -2.0f;
+      } else if (action == 5) {
+        microAction = "WIDE_EYES";
+        gazeTargetX = (esp_random() & 1) ? -3.0f : 3.0f; gazeTargetY = 0.0f;
+      } else if (action == 6) {
+        microAction = "SQUINT"; gazeTargetX = 0.0f; gazeTargetY = 1.0f;
+      } else if (action == 7) {
+        microAction = "LOOK_AROUND";
+        gazeTargetX = (esp_random() & 1) ? -7.0f : 7.0f; gazeTargetY = -2.0f;
+      } else if (action == 8) {
+        microAction = "FOLLOW"; gazeTargetX = (esp_random() & 1) ? -4.5f : 4.5f; gazeTargetY = (esp_random() & 1) ? -2.0f : 2.0f;
+      } else if (action == 9) {
+        microAction = "NOD"; gazeTargetX = 0.0f; gazeTargetY = -1.0f;
+      } else {
+        microAction = "GLANCE"; gazeTargetX = (esp_random() & 1) ? -6.0f : 6.0f; gazeTargetY = 1.5f;
+      }
+      microActionUntil = now + 750UL + (esp_random() % 950UL);
+      drawFace();
+
+      // Action-specific chirps make the sound feel tied to what the face is doing.
+      if (soundEnabled && (esp_random() % 100) < 38 && now - lastMoodSoundAt > 6500UL) {
+        // Routed through the voice task (low priority) so it never collides with other sounds.
+        const char* voiceMood = "CURIOUS";
+        if (microAction == "EXCITED") voiceMood = "HAPPY";
+        else if (microAction == "WIDE_EYES") voiceMood = "SURPRISED";
+        else if (microAction == "SQUINT") voiceMood = "ANNOYED";
+        else if (microAction == "FOLLOW" || microAction == "GLANCE") voiceMood = "CURIOUS";
+        else if (microAction == "NOD") voiceMood = "LOVE";
+        requestVoice(voiceMood, true);
+        lastMoodSoundAt = millis();
+      }
+    }
+  }
+
+  if (gazeMoved) drawFace();
+}
+
+void updateAutonomousMood() {
+  const unsigned long now = millis();
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  const unsigned long idleFor = now - lastActivity;
+
+  if (nextAutonomousMoodAt == 0) {
+    nextAutonomousMoodAt = now + 5000UL + (esp_random() % 5000UL);
+  }
+
+  if (!connected) {
+    if (wifiWasConnected || wifiLostAt == 0) wifiLostAt = now;
+
+    // Offline mode must remain fully autonomous: Wi-Fi is only for cloud features.
+    // Do not force sleep merely because the network is unavailable.
+    if (now >= moodOverrideUntil && now >= nextAutonomousMoodAt) {
+      String next = chooseAutonomousMood(mood);
+
+      if (idleFor > 120000UL) {
+        next = "SLEEPY";
+      } else if (idleFor > 60000UL) {
+        next = petMoodValue > 30 ? "BORED" : "SLEEPY";
+      } else if (idleFor < 15000UL && next == "SLEEPY") {
+        next = "CURIOUS";
+      }
+
+      if (next != mood) {
+        mood = next;
+        drawFace();
+        Serial.println("Autonomous mood (offline): " + mood);
+        if (mood != "SLEEPY" && now - lastMoodSoundAt > 7000UL &&
+            (esp_random() % 100) < 35) {
+          playRobotSound(mood);
+          lastMoodSoundAt = now;
+        }
+      }
+      nextAutonomousMoodAt = now + 12000UL + (esp_random() % 13000UL);
+    }
+  } else {
+    if (!wifiWasConnected) {
+      // Reconnection feels like someone has come back.
+      mood = "SURPRISED";
+      playRobotSound(mood);
+      moodOverrideUntil = now + 5000UL;
+      lastActivity = now;
+      nextAutonomousMoodAt = moodOverrideUntil + 5000UL;
+      drawFace();
+    } else if (now >= moodOverrideUntil && now >= nextAutonomousMoodAt) {
+      String next = chooseAutonomousMood(mood);
+
+      // Idle behavior has a slower rhythm. After two minutes without interaction,
+      // PETBOT settles into sleep instead of endlessly changing expressions.
+      if (idleFor > 120000UL) {
+        // Long inactivity: settle into sleep and let energy recover.
+        next = "SLEEPY";
+      } else if (idleFor > 60000UL) {
+        // A distinct bored phase between active exploration and sleep.
+        next = petMoodValue > 30 ? "BORED" : "SLEEPY";
+      } else if (idleFor < 15000UL && next == "SLEEPY") {
+        next = "CURIOUS";
+      }
+
+      if (next != mood) {
+        mood = next;
+        drawFace();
+        Serial.println("Autonomous mood: " + mood);
+        // Only occasional sounds: the character should not chirp every few seconds.
+        if (mood != "SLEEPY" && now - lastMoodSoundAt > 7000UL &&
+            (esp_random() % 100) < 35) {
+          playRobotSound(mood);
+          lastMoodSoundAt = now;
+        }
+      }
+
+      // Give each mood room to breathe instead of flipping every few seconds.
+      nextAutonomousMoodAt = now + 12000UL + (esp_random() % 13000UL);
+    }
+    wifiLostAt = 0;
+  }
+
+  wifiWasConnected = connected;
+}
+
+void loop() {
+  static bool cloudTaskStarted = false;
+  if (!cloudTaskStarted) {
+    cloudTaskStarted = true;
+    cloudMutex = xSemaphoreCreateMutex();
+    xTaskCreatePinnedToCore(cloudTask, "petbot_cloud", 10240, NULL, 1, NULL, 0);
+  }
+  handleSerialProvisioning();
+  checkForFirmwareUpdate();
+  if (notificationMessage.length() && (long)(millis() - notificationUntil) >= 0) {
+    notificationMessage = "";
+    drawFace();
+  }
+  updatePetNeeds();
+  updateAutonomousMood();
+  updateMicroAction();
+  updatePhysicalInput();
+  sampleIRSensor();
+  updateSoundPersonality();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    static unsigned long lastWifiRetry = 0;
+
+    if (millis() - lastWifiRetry > 15000UL) {
+      lastWifiRetry = millis();
+      WiFi.reconnect();
+    }
+  } else {
+    // Network I/O happens in cloudTask; here we only consume what it fetched.
+    if (cloudInboxReady) {
+      String response;
+      xSemaphoreTake(cloudMutex, portMAX_DELAY);
+      response = cloudInbox;
+      cloudInboxReady = false;
+      xSemaphoreGive(cloudMutex);
+      handlePollResponse(response);
+    }
+
+    if (millis() - lastHeartbeat >= 15000UL) {
+      lastHeartbeat = millis();
+      sendHeartbeat();
+    }
+  }
+
+  // Non-blocking blink with a rhythm that depends on the emotion.
+  const unsigned long nowB = millis();
+  if (blinking) {
+    if ((long)(nowB - blinkUntil) >= 0) blinking = false;
+  } else {
+    if (nextBlinkAt == 0) nextBlinkAt = nowB + 1200UL;
+    if ((long)(nowB - nextBlinkAt) >= 0) {
+      blinking = true;
+      lastBlink = nowB;
+      blinkUntil = nowB + blinkLengthFor(mood);
+      nextBlinkAt = nowB + blinkGapFor(mood);
+    }
+  }
+
+  // Closed eyes only belong to sleep; any other emotion wakes them up again.
+  if (mood != "SLEEPY") eyesOpen = true;
+
+  // ~15 fps: continuous animation (bounce, tremble, tears, sparkles).
+  static unsigned long lastFrameAt = 0;
+  if (nowB - lastFrameAt >= 66UL) {
+    lastFrameAt = nowB;
+    drawFace();
+  }
+
+  delay(8);
+}
