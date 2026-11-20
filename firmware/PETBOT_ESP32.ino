@@ -23,7 +23,7 @@
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.7.3-t3";
+const char* FIRMWARE_VERSION = "petbot-3.7.4-t3";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -58,6 +58,7 @@ unsigned long lastDhtSampleAt = 0;
 float dhtTemperatureC = NAN;
 float dhtHumidity = NAN;
 bool dhtAvailable = false;
+String dhtComfortState = "UNKNOWN";
 
 void sampleDht11(bool force = false) {
   const unsigned long now = millis();
@@ -80,6 +81,26 @@ void sampleDht11(bool force = false) {
   dhtAvailable = true;
   Serial.printf("DHT11 GPIO4: %.1f C, %.1f %% RH\n",
                 dhtTemperatureC, dhtHumidity);
+
+  String nextState = "COMFORTABLE";
+  if (dhtTemperatureC >= 30.0f) nextState = "HOT";
+  else if (dhtTemperatureC <= 15.0f) nextState = "COLD";
+  else if (dhtHumidity >= 80.0f) nextState = "HUMID";
+  else if (dhtHumidity <= 25.0f) nextState = "DRY";
+
+  if (dhtComfortState == "UNKNOWN") {
+    dhtComfortState = nextState;
+  } else if (nextState != dhtComfortState) {
+    const String previousState = dhtComfortState;
+    dhtComfortState = nextState;
+    Serial.printf("Environment changed: %s -> %s\n", previousState.c_str(), dhtComfortState.c_str());
+    if (millis() >= moodOverrideUntil) {
+      mood = (dhtComfortState == "COMFORTABLE") ? "CURIOUS" : "ANNOYED";
+      moodOverrideUntil = millis() + 3500UL;
+      nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+      drawFace();
+    }
+  }
 }
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
@@ -1121,13 +1142,14 @@ void handlePollResponse(const String& response) {
 
 void printPetbotHelp() {
   Serial.println("PETBOT commands:");
-  Serial.println("STATUS - connection, mood, sound, IR sensor, interactions");
+  Serial.println("STATUS - connection, mood, DHT11, PIR, IR, interactions");
   Serial.println("HELP - show commands");
   Serial.println("PET - affectionate reaction");
   Serial.println("PLAY - happy sound");
   Serial.println("SOUND:ON / SOUND:OFF");
   Serial.println("TOUCH:ON / TOUCH:OFF / TOUCH:READ - optional touch wire on GPIO4");
   Serial.println("VOICE:HAPPY|CURIOUS|SURPRISED|LOVE|ANNOYED|SLEEPY|SAD|PLAYFUL|DIZZY|SUSPICIOUS|FRUSTRATED|ECSTATIC / PURR");
+  Serial.println("PIR - motion sensor on GPIO36 (S_VP), automatic");
   Serial.println("IR:ON / IR:OFF - enable or disable IR obstacle sensor on GPIO34");
   Serial.println("IR:READ - read current IR sensor TX logic level");
   Serial.println("NEEDS - show all internal state dimensions");
@@ -1175,9 +1197,9 @@ void handleSerialProvisioning() {
     Serial.println(String("Wi-Fi connected: ") + (WiFi.status() == WL_CONNECTED ? "YES" : "NO"));
     Serial.println(String("Mood: ") + mood);
     Serial.println(String("Sound enabled: ") + (soundEnabled ? "YES" : "NO"));
-    Serial.println(String("IR enabled: ") + (irEnabled ? "YES" : "NO"));
-    Serial.println(String("IR GPIO34 level: ") + digitalRead(PETBOT_IR_PIN));
-    Serial.println(String("PIR GPIO36 (S_VP) level: ") + digitalRead(PETBOT_PIR_PIN));
+    Serial.println(String("DHT11: ") + (dhtAvailable ? (String(dhtTemperatureC, 1) + " C, " + String(dhtHumidity, 1) + " % RH; " + dhtComfortState) : "no valid reading"));
+    Serial.println(String("PIR GPIO36 (S_VP): level=") + digitalRead(PETBOT_PIR_PIN));
+    Serial.println(String("IR obstacle GPIO34: ") + (irEnabled ? "ENABLED" : "DISABLED") + ", level=" + digitalRead(PETBOT_IR_PIN));
     Serial.println(String("Interactions: ") + interactionCount);
     Serial.println(String("Needs C/E/M/A: ") + petCuriosity + "/" + petEnergy + "/" + petMoodValue + "/" + petAttachment);
     Serial.println(String("Vector model S/S/C: ") + petStimulation + "/" + petSocialNeed + "/" + petConfidence);
@@ -1559,7 +1581,7 @@ void setup() {
   petName = petbotPrefs.getString("pet_name", "Jupiter");
   petbotPrefs.putString("pet_name", "Jupiter");
   soundEnabled = petbotPrefs.getBool("sound", true);
-  irEnabled = petbotPrefs.getBool("ir_enabled", false);
+  irEnabled = petbotPrefs.getBool("ir_enabled", true);
   interactionCount = petbotPrefs.getUInt("interactions", 0);
   petCuriosity = constrain(petbotPrefs.getInt("curiosity", 58), 0, 100);
   petEnergy = constrain(petbotPrefs.getInt("energy", 88), 0, 100);
