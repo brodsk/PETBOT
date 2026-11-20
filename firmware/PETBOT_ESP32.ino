@@ -60,48 +60,7 @@ float dhtHumidity = NAN;
 bool dhtAvailable = false;
 String dhtComfortState = "UNKNOWN";
 
-void sampleDht11(bool force = false) {
-  const unsigned long now = millis();
-  if (!force && now - lastDhtSampleAt < 2500UL) return;
-  lastDhtSampleAt = now;
 
-  const TempAndHumidity reading = dhtSensor.getTempAndHumidity();
-  if (dhtSensor.getStatus() != DHTesp::ERROR_NONE ||
-      isnan(reading.temperature) || isnan(reading.humidity) ||
-      reading.humidity < 0.0f || reading.humidity > 100.0f ||
-      reading.temperature < -10.0f || reading.temperature > 60.0f) {
-    dhtAvailable = false;
-    Serial.printf("DHT11 GPIO4: read failed (%s); check S/3V3/GND and wait 2 s between reads\n",
-                  dhtSensor.getStatusString());
-    return;
-  }
-
-  dhtHumidity = reading.humidity;
-  dhtTemperatureC = reading.temperature;
-  dhtAvailable = true;
-  Serial.printf("DHT11 GPIO4: %.1f C, %.1f %% RH\n",
-                dhtTemperatureC, dhtHumidity);
-
-  String nextState = "COMFORTABLE";
-  if (dhtTemperatureC >= 30.0f) nextState = "HOT";
-  else if (dhtTemperatureC <= 15.0f) nextState = "COLD";
-  else if (dhtHumidity >= 80.0f) nextState = "HUMID";
-  else if (dhtHumidity <= 25.0f) nextState = "DRY";
-
-  if (dhtComfortState == "UNKNOWN") {
-    dhtComfortState = nextState;
-  } else if (nextState != dhtComfortState) {
-    const String previousState = dhtComfortState;
-    dhtComfortState = nextState;
-    Serial.printf("Environment changed: %s -> %s\n", previousState.c_str(), dhtComfortState.c_str());
-    if (millis() >= moodOverrideUntil) {
-      mood = (dhtComfortState == "COMFORTABLE") ? "CURIOUS" : "ANNOYED";
-      moodOverrideUntil = millis() + 3500UL;
-      nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
-      drawFace();
-    }
-  }
-}
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
@@ -1565,6 +1524,49 @@ void checkForFirmwareUpdate() {
   ESP.restart();
 }
 
+
+void sampleDht11(bool force = false) {
+  const unsigned long now = millis();
+  if (!force && now - lastDhtSampleAt < 2500UL) return;
+  lastDhtSampleAt = now;
+
+  const TempAndHumidity reading = dhtSensor.getTempAndHumidity();
+  if (dhtSensor.getStatus() != DHTesp::ERROR_NONE ||
+      isnan(reading.temperature) || isnan(reading.humidity) ||
+      reading.humidity < 0.0f || reading.humidity > 100.0f ||
+      reading.temperature < -10.0f || reading.temperature > 60.0f) {
+    dhtAvailable = false;
+    Serial.printf("DHT11 GPIO4: read failed (%s); check S/3V3/GND and wait 2 s between reads\n",
+                  dhtSensor.getStatusString());
+    return;
+  }
+
+  dhtHumidity = reading.humidity;
+  dhtTemperatureC = reading.temperature;
+  dhtAvailable = true;
+  Serial.printf("DHT11 GPIO4: %.1f C, %.1f %% RH\n",
+                dhtTemperatureC, dhtHumidity);
+
+  String nextState = "COMFORTABLE";
+  if (dhtTemperatureC >= 30.0f) nextState = "HOT";
+  else if (dhtTemperatureC <= 15.0f) nextState = "COLD";
+  else if (dhtHumidity >= 80.0f) nextState = "HUMID";
+  else if (dhtHumidity <= 25.0f) nextState = "DRY";
+
+  if (dhtComfortState == "UNKNOWN") {
+    dhtComfortState = nextState;
+  } else if (nextState != dhtComfortState) {
+    const String previousState = dhtComfortState;
+    dhtComfortState = nextState;
+    Serial.printf("Environment changed: %s -> %s\n", previousState.c_str(), dhtComfortState.c_str());
+    if (millis() >= moodOverrideUntil) {
+      mood = (dhtComfortState == "COMFORTABLE") ? "CURIOUS" : "ANNOYED";
+      moodOverrideUntil = millis() + 3500UL;
+      nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+      drawFace();
+    }
+  }
+}
 
 void setup() {
   Serial.begin(115200);
