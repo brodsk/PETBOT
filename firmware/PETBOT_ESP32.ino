@@ -18,6 +18,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <DHTesp.h>
+#include <esp_log.h>
 #include "petbot_face_bitmaps.h"
 #include "petbot_face_reference.h"
 
@@ -1570,6 +1571,9 @@ void sampleDht11(bool force = false) {
 
 void setup() {
   Serial.begin(115200);
+  Serial.setDebugOutput(false);
+  esp_log_level_set("*", ESP_LOG_NONE);
+  delay(250);
   pinMode(PETBOT_PIEZO_PIN, OUTPUT);
   xTaskCreatePinnedToCore(voiceTask, "petbot_voice", 4096, NULL, 1, NULL, 0);
   pinMode(PETBOT_IR_PIN, INPUT);
