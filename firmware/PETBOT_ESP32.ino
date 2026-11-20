@@ -1,5 +1,5 @@
 /*
-  PETBOT firmware v3.7.1-t3
+  PETBOT firmware v3.7.3-t3
   Board: LILYGO T3 V1.6.1 (classic ESP32)
   Features: local Vector-inspired behavior model, seven internal drives,
   OLED face, autonomous gaze, piezo sound motifs, optional cloud commands.
@@ -17,13 +17,13 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-#include <DHT.h>
+#include <DHTesp.h>
 #include "petbot_face_bitmaps.h"
 #include "petbot_face_reference.h"
 
 Preferences petbotPrefs;
 String deviceToken;
-const char* FIRMWARE_VERSION = "petbot-3.7.2-t3";
+const char* FIRMWARE_VERSION = "petbot-3.7.3-t3";
 const char* OTA_MANIFEST_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/manifest.txt";
 const char* OTA_FIRMWARE_URL = "https://github.com/brodsk/PETBOT/releases/latest/download/petbot.bin";
 unsigned long lastOtaCheck = 0;
@@ -37,9 +37,11 @@ const char* CLOUD_BASE = "https://petbotpet.vercel.app";
 #define OLED_SDA 21
 #define OLED_SCL 22
 
-// Optional hardware: passive piezo on GPIO25; IR obstacle sensor TX on GPIO34.
+// Optional hardware: passive piezo on GPIO25; IR obstacle sensor TX on GPIO34; PIR OUT on GPIO36 (LILYGO label S_VP).
 #define PETBOT_PIEZO_PIN 25
 #define PETBOT_IR_PIN 34
+#define PETBOT_PIR_PIN 36
+#define PETBOT_PIR_ACTIVE_LEVEL HIGH
 #define PETBOT_IR_ACTIVE_LEVEL LOW  // Common active-low obstacle sensor output; verify during testing.
 #define PETBOT_BATTERY_PIN 35 // Reserved for future battery divider; not sampled in this build
 #define PETBOT_BATTERY_DIVIDER 2.0f
@@ -50,8 +52,8 @@ bool touchEnabled = false;
 int touchBaseline = 0;
 void calibrateTouch();
 
-// DHT11 sensor on GPIO4. The Adafruit library handles ESP32 pulse timing.
-DHT dhtSensor(PETBOT_DHT11_PIN, DHT11);
+// DHT11 sensor on GPIO4. DHTesp uses ESP32-specific timing.
+DHTesp dhtSensor;
 unsigned long lastDhtSampleAt = 0;
 float dhtTemperatureC = NAN;
 float dhtHumidity = NAN;
@@ -59,21 +61,22 @@ bool dhtAvailable = false;
 
 void sampleDht11(bool force = false) {
   const unsigned long now = millis();
-  if (!force && now - lastDhtSampleAt < 3000UL) return;
+  if (!force && now - lastDhtSampleAt < 2500UL) return;
   lastDhtSampleAt = now;
 
-  const float humidity = dhtSensor.readHumidity();
-  const float temperature = dhtSensor.readTemperature();
-  if (isnan(humidity) || isnan(temperature) ||
-      humidity < 0.0f || humidity > 100.0f ||
-      temperature < 0.0f || temperature > 80.0f) {
+  const TempAndHumidity reading = dhtSensor.getTempAndHumidity();
+  if (dhtSensor.getStatus() != DHTesp::ERROR_NONE ||
+      isnan(reading.temperature) || isnan(reading.humidity) ||
+      reading.humidity < 0.0f || reading.humidity > 100.0f ||
+      reading.temperature < -10.0f || reading.temperature > 60.0f) {
     dhtAvailable = false;
-    Serial.println("DHT11 GPIO4: read failed; check S/3V3/GND");
+    Serial.printf("DHT11 GPIO4: read failed (%s); check S/3V3/GND and wait 2 s between reads\\n",
+                  dhtSensor.getStatusString());
     return;
   }
 
-  dhtHumidity = humidity;
-  dhtTemperatureC = temperature;
+  dhtHumidity = reading.humidity;
+  dhtTemperatureC = reading.temperature;
   dhtAvailable = true;
   Serial.printf("DHT11 GPIO4: %.1f C, %.1f %% RH\\n",
                 dhtTemperatureC, dhtHumidity);
@@ -466,6 +469,55 @@ void updateSoundPersonality() {
     lastMoodSoundAt = now;
     scheduleNextIdleSound();
   }
+}
+
+void samplePIRSensor() {
+  static bool initialized = false;
+  static int stableLevel = LOW;
+  static int candidateLevel = LOW;
+  static unsigned long candidateSince = 0;
+  static unsigned long lastEventAt = 0;
+  static unsigned long lastLogAt = 0;
+  const unsigned long now = millis();
+  const int level = digitalRead(PETBOT_PIR_PIN);
+
+  if (!initialized) {
+    initialized = true;
+    stableLevel = candidateLevel = level;
+    candidateSince = now;
+    Serial.printf("PIR ready: GPIO36 (S_VP), initial level=%d; warming up for 30 s\\n", level);
+    return;
+  }
+
+  if (level != candidateLevel) {
+    candidateLevel = level;
+    candidateSince = now;
+    return;
+  }
+  if (level == stableLevel || now - candidateSince < 60UL) return;
+
+  const int previousLevel = stableLevel;
+  stableLevel = level;
+  if (now - lastLogAt > 1000UL) {
+    Serial.printf("PIR GPIO36 (S_VP): level=%d\\n", level);
+    lastLogAt = now;
+  }
+
+  if (previousLevel != LOW || level != PETBOT_PIR_ACTIVE_LEVEL ||
+      now < 30000UL || now - lastEventAt < 1800UL) return;
+
+  lastEventAt = now;
+  registerPetInteraction(false);
+  mood = "SURPRISED";
+  moodOverrideUntil = now + 2200UL;
+  nextAutonomousMoodAt = moodOverrideUntil + 1000UL;
+  gazeTargetX = (esp_random() & 1) ? -5.0f : 5.0f;
+  gazeTargetY = -1.0f;
+  microAction = "WIDE_EYES";
+  microActionUntil = now + 700UL;
+  drawFace();
+  playRobotSound("SURPRISED");
+  Serial.println("PETBOT PIR: motion detected");
 }
 
 void sampleIRSensor() {
@@ -1125,6 +1177,7 @@ void handleSerialProvisioning() {
     Serial.println(String("Sound enabled: ") + (soundEnabled ? "YES" : "NO"));
     Serial.println(String("IR enabled: ") + (irEnabled ? "YES" : "NO"));
     Serial.println(String("IR GPIO34 level: ") + digitalRead(PETBOT_IR_PIN));
+    Serial.println(String("PIR GPIO36 (S_VP) level: ") + digitalRead(PETBOT_PIR_PIN));
     Serial.println(String("Interactions: ") + interactionCount);
     Serial.println(String("Needs C/E/M/A: ") + petCuriosity + "/" + petEnergy + "/" + petMoodValue + "/" + petAttachment);
     Serial.println(String("Vector model S/S/C: ") + petStimulation + "/" + petSocialNeed + "/" + petConfidence);
@@ -1496,6 +1549,7 @@ void setup() {
   pinMode(PETBOT_PIEZO_PIN, OUTPUT);
   xTaskCreatePinnedToCore(voiceTask, "petbot_voice", 4096, NULL, 1, NULL, 0);
   pinMode(PETBOT_IR_PIN, INPUT);
+  pinMode(PETBOT_PIR_PIN, INPUT);
   pinMode(PETBOT_BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(PETBOT_BUTTON_PIN), onButtonEdge, CHANGE);
   analogReadResolution(12);
@@ -1516,7 +1570,8 @@ void setup() {
   petConfidence = constrain(petbotPrefs.getInt("confidence", 52), 0, 100);
   petbotPrefs.end();
   touchEnabled = false; // GPIO4 is reserved for the connected DHT11 module.
-  dhtSensor.begin();
+  pinMode(PETBOT_DHT11_PIN, INPUT_PULLUP);
+  dhtSensor.setup(PETBOT_DHT11_PIN, DHTesp::DHT11);
 
   Serial.println(String("Hello! My name is ") + petName);
   Serial.println(
@@ -1529,6 +1584,7 @@ void setup() {
   Serial.println(String("IR sensor GPIO34: ") + (irEnabled ? "ENABLED" : "DISABLED") + " | sound: " + (soundEnabled ? "ON" : "OFF"));
   Serial.println("IMPORTANT: IR OUT must be 0-3.3V before connection to GPIO34.");
   Serial.println("DHT11 sensor: GPIO4 (DATA), 3V3 (VCC), GND.");
+  Serial.println("PIR sensor: GPIO36 (S_VP / OUT), VCC per module rating, common GND.");
   printPetbotHelp();
 
   Wire.begin(OLED_SDA, OLED_SCL);
@@ -1822,6 +1878,7 @@ void loop() {
   updateMicroAction();
   updatePhysicalInput();
   sampleIRSensor();
+  samplePIRSensor();
   updateSoundPersonality();
 
   if (WiFi.status() != WL_CONNECTED) {
